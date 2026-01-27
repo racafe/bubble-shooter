@@ -276,6 +276,21 @@ wss.on('connection', (ws) => {
       return;
     }
 
+    // Handle close_room from desktop (game ended)
+    if (message.type === 'close_room' && clientType === CLIENT_TYPE.DESKTOP) {
+      // Notify phone that room is closed
+      if (clientRoom.phone) {
+        sendMessage(clientRoom.phone, {
+          type: 'room_closed',
+          data: { message: 'Game ended' }
+        });
+      }
+      // Remove room immediately
+      removeRoom(clientRoom.code);
+      clientRoom = null;
+      return;
+    }
+
     // Route the message to the paired client
     handleMessage(ws, clientRoom, clientType, message);
   });

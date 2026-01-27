@@ -776,12 +776,12 @@ class GameScene extends Phaser.Scene {
   setupWebSocketHandlers() {
     this.ws.onmessage = (event) => {
       const message = JSON.parse(event.data);
-      if (message.type === 'game_message') {
-        if (message.data.type === 'shoot') {
-          this.handleShoot(message.data.angle);
-        } else if (message.data.type === 'aim') {
-          this.handleAim(message.data.angle);
-        }
+      if (message.type === 'shoot') {
+        this.handleShoot(message.data.angle);
+      } else if (message.type === 'aim') {
+        this.handleAim(message.data.angle);
+      } else if (message.type === 'submit_initials') {
+        this.handleSubmitInitials(message.data.initials);
       } else if (message.type === 'peer_disconnected') {
         this.onControllerDisconnected();
       } else if (message.type === 'peer_connected' || message.type === 'peer_reconnected') {
@@ -1111,6 +1111,13 @@ class GameScene extends Phaser.Scene {
         if (newBubble) {
           this.checkAndPopMatches(newBubble);
         }
+
+        // Check for game over immediately after bubble placement
+        this.time.delayedCall(150, () => {
+          if (!this.isGameOver && this.checkGameOver()) {
+            this.triggerGameOver();
+          }
+        });
       }
     });
   }
@@ -2526,9 +2533,24 @@ class GameScene extends Phaser.Scene {
       });
       yPos += 45;
 
-      // Initials input section
-      this.createInitialsInput(yPos);
-      yPos += 80;
+      // Show waiting message (initials entry is on mobile)
+      const waitingText = this.add.text(0, yPos, 'Enter initials on controller...', {
+        fontSize: '18px',
+        fontFamily: '"Comic Sans MS", "Chalkboard", cursive, sans-serif',
+        color: '#f59e0b'
+      }).setOrigin(0.5);
+      this.gameOverOverlay.add(waitingText);
+
+      // Pulsing animation for waiting text
+      this.tweens.add({
+        targets: waitingText,
+        alpha: 0.5,
+        duration: 800,
+        yoyo: true,
+        repeat: -1,
+        ease: 'Sine.easeInOut'
+      });
+      yPos += 50;
     } else {
       yPos += 20;
     }
@@ -2536,8 +2558,7 @@ class GameScene extends Phaser.Scene {
     // Leaderboard section
     this.createLeaderboardDisplay(yPos);
 
-    // Play Again button at the bottom
-    this.createPlayAgainButton(height / 2 - 60);
+    // No play again button - game will restart to QR code after initials
   }
 
   // Create initials input for high score entry
@@ -2931,6 +2952,7 @@ class GameScene extends Phaser.Scene {
   triggerGameOver() {
     this.isGameOver = true;
     this.isPaused = true;
+    this.initialsReceived = false;
 
     // Stop background music
     musicManager.stop();
@@ -2947,6 +2969,26 @@ class GameScene extends Phaser.Scene {
     }
     this.hideWarningIndicator();
 
+    // Check if this is a high score
+    const { isHighScore } = this.checkHighScore(this.score);
+    this.isHighScore = isHighScore;
+
+    // Send game over to controller for initials entry
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({
+        type: 'game_over',
+        data: { score: this.score, isHighScore }
+      }));
+    }
+
+    // Desktop-side timeout: if controller doesn't respond in 25 seconds, auto-close
+    this.gameOverTimeout = this.time.delayedCall(25000, () => {
+      if (this.isGameOver && !this.initialsReceived) {
+        // No response from controller, close without saving
+        this.returnToWaitingScene();
+      }
+    });
+
     // Build the game over screen with leaderboard
     this.buildGameOverScreen();
 
@@ -2962,6 +3004,47 @@ class GameScene extends Phaser.Scene {
       duration: 400,
       ease: 'Back.easeOut'
     });
+  }
+
+  // Handle initials submission from controller
+  handleSubmitInitials(initials) {
+    if (!this.isGameOver || this.initialsReceived) return;
+
+    this.initialsReceived = true;
+
+    // Cancel the timeout since we got a response
+    if (this.gameOverTimeout) {
+      this.gameOverTimeout.remove();
+      this.gameOverTimeout = null;
+    }
+
+    // Save score if we have initials and it's a high score
+    if (initials && this.isHighScore) {
+      this.playerInitials = initials;
+      this.addToLeaderboard(initials, this.score);
+    }
+
+    // Close room and restart to QR code after a short delay
+    this.time.delayedCall(1500, () => {
+      this.returnToWaitingScene();
+    });
+  }
+
+  // Return to the waiting scene (QR code)
+  returnToWaitingScene() {
+    // Tell server to close the room (this notifies the controller)
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({ type: 'close_room' }));
+    }
+
+    // Close the WebSocket connection
+    if (this.ws) {
+      this.ws.close();
+      this.ws = null;
+    }
+
+    // Switch back to the waiting scene
+    this.scene.start('WaitingScene');
   }
 }
 
@@ -3086,6 +3169,11 @@ class WaitingScene extends Phaser.Scene {
           light: '#ffffff'
         }
       });
+
+      // Remove existing texture if present (for game restarts)
+      if (this.textures.exists('qrcode')) {
+        this.textures.remove('qrcode');
+      }
 
       // Load as Phaser texture
       this.textures.addBase64('qrcode', qrDataUrl);

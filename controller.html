@@ -198,6 +198,139 @@
     .angle-display.visible {
       opacity: 1;
     }
+
+    /* Game Over overlay */
+    .gameover-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.95);
+      display: none;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      z-index: 200;
+      padding: 20px;
+    }
+    .gameover-overlay.visible {
+      display: flex;
+    }
+    .gameover-title {
+      color: #ef4444;
+      font-size: 36px;
+      font-weight: bold;
+      margin-bottom: 10px;
+      text-shadow: 0 0 20px rgba(239, 68, 68, 0.5);
+    }
+    .gameover-score {
+      color: #fbbf24;
+      font-size: 48px;
+      font-weight: bold;
+      margin-bottom: 20px;
+    }
+    .gameover-highscore {
+      color: #4ade80;
+      font-size: 18px;
+      margin-bottom: 30px;
+      animation: pulse 1s ease-in-out infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.8; transform: scale(1.05); }
+    }
+    .initials-section {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      margin-bottom: 20px;
+    }
+    .initials-label {
+      color: #888;
+      font-size: 14px;
+      margin-bottom: 15px;
+    }
+    .initials-input {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 20px;
+    }
+    .initial-box {
+      width: 60px;
+      height: 70px;
+      background: rgba(255, 255, 255, 0.1);
+      border: 3px solid rgba(255, 255, 255, 0.3);
+      border-radius: 10px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+    }
+    .initial-box.selected {
+      border-color: #4ade80;
+      background: rgba(74, 222, 128, 0.1);
+    }
+    .initial-letter {
+      color: #fff;
+      font-size: 32px;
+      font-weight: bold;
+    }
+    .initial-arrows {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+    .initial-arrow {
+      width: 30px;
+      height: 20px;
+      background: rgba(255, 255, 255, 0.2);
+      border: none;
+      border-radius: 5px;
+      color: #fff;
+      font-size: 12px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .initial-arrow:active {
+      background: rgba(74, 222, 128, 0.5);
+    }
+    .countdown-timer {
+      color: #f59e0b;
+      font-size: 24px;
+      font-weight: bold;
+      margin-bottom: 20px;
+    }
+    .countdown-timer.urgent {
+      color: #ef4444;
+      animation: blink 0.5s ease-in-out infinite;
+    }
+    @keyframes blink {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+    .submit-button {
+      background: linear-gradient(145deg, #4ade80, #22c55e);
+      color: #000;
+      border: none;
+      padding: 16px 50px;
+      font-size: 18px;
+      font-weight: bold;
+      border-radius: 30px;
+      cursor: pointer;
+      transition: transform 0.1s;
+    }
+    .submit-button:active {
+      transform: scale(0.95);
+    }
+    .gameover-message {
+      color: #888;
+      font-size: 16px;
+      text-align: center;
+      margin-top: 20px;
+    }
   </style>
 </head>
 <body>
@@ -209,6 +342,38 @@
     <div class="reconnect-status" id="reconnectStatus">Attempting to reconnect...</div>
     <button class="reconnect-button" id="reconnectButton">Reconnect</button>
     <div class="reconnect-attempts" id="reconnectAttempts"></div>
+  </div>
+
+  <!-- Game Over overlay -->
+  <div class="gameover-overlay" id="gameoverOverlay">
+    <div class="gameover-title">GAME OVER</div>
+    <div class="gameover-score" id="gameoverScore">0</div>
+    <div class="gameover-highscore" id="gameoverHighscore" style="display: none;">NEW HIGH SCORE!</div>
+
+    <div class="initials-section" id="initialsSection">
+      <div class="initials-label">Enter your initials:</div>
+      <div class="initials-input">
+        <div class="initial-box selected" data-index="0">
+          <button class="initial-arrow" data-dir="up">&#9650;</button>
+          <span class="initial-letter" id="initial0">A</span>
+          <button class="initial-arrow" data-dir="down">&#9660;</button>
+        </div>
+        <div class="initial-box" data-index="1">
+          <button class="initial-arrow" data-dir="up">&#9650;</button>
+          <span class="initial-letter" id="initial1">A</span>
+          <button class="initial-arrow" data-dir="down">&#9660;</button>
+        </div>
+        <div class="initial-box" data-index="2">
+          <button class="initial-arrow" data-dir="up">&#9650;</button>
+          <span class="initial-letter" id="initial2">A</span>
+          <button class="initial-arrow" data-dir="down">&#9660;</button>
+        </div>
+      </div>
+      <div class="countdown-timer" id="countdownTimer">20</div>
+      <button class="submit-button" id="submitInitials">SAVE SCORE</button>
+    </div>
+
+    <div class="gameover-message" id="gameoverMessage"></div>
   </div>
 
   <div class="controller-area" id="controllerArea">
@@ -245,6 +410,21 @@
     const reconnectButton = document.getElementById('reconnectButton');
     const reconnectAttempts = document.getElementById('reconnectAttempts');
 
+    // Game over DOM elements
+    const gameoverOverlay = document.getElementById('gameoverOverlay');
+    const gameoverScore = document.getElementById('gameoverScore');
+    const gameoverHighscore = document.getElementById('gameoverHighscore');
+    const initialsSection = document.getElementById('initialsSection');
+    const countdownTimer = document.getElementById('countdownTimer');
+    const submitInitialsBtn = document.getElementById('submitInitials');
+    const gameoverMessage = document.getElementById('gameoverMessage');
+    const initialBoxes = document.querySelectorAll('.initial-box');
+    const initialLetters = [
+      document.getElementById('initial0'),
+      document.getElementById('initial1'),
+      document.getElementById('initial2')
+    ];
+
     // State
     let ws = null;
     let isConnected = false;
@@ -252,6 +432,13 @@
     let joystickCenter = { x: 0, y: 0 };
     let currentAngle = 90; // Degrees, 90 = straight up
     const maxDistance = 55; // Max drag distance from center
+
+    // Game over state
+    let isGameOver = false;
+    let currentInitials = ['A', 'A', 'A'];
+    let selectedInitialIndex = 0;
+    let countdownInterval = null;
+    let countdownSeconds = 30;
 
     // Reconnection state
     let reconnectAttemptCount = 0;
@@ -422,7 +609,8 @@
           break;
         case 'error':
           setStatus('error', message.data?.message || 'Error');
-          if (message.data?.message === 'Room expired or not found') {
+          const errorMsg = message.data?.message || '';
+          if (errorMsg.includes('Room') && (errorMsg.includes('not found') || errorMsg.includes('expired'))) {
             // Room no longer exists, show error state
             showReconnectOverlay(
               'Room Expired',
@@ -430,6 +618,12 @@
               false
             );
             isReconnecting = false;
+            // Close WebSocket
+            if (ws) {
+              ws.close();
+              ws = null;
+            }
+            isConnected = false;
           }
           break;
         case 'peer_disconnected':
@@ -438,7 +632,151 @@
         case 'peer_reconnected':
           setStatus('connected', 'Connected');
           break;
+        case 'game_over':
+          handleGameOver(message.data);
+          break;
+        case 'room_closed':
+          handleRoomClosed();
+          break;
       }
+    }
+
+    // Handle game over - show initials entry
+    function handleGameOver(data) {
+      isGameOver = true;
+      const { score, isHighScore } = data;
+
+      // Update score display
+      gameoverScore.textContent = score.toString();
+
+      // Show/hide high score message and initials section
+      if (isHighScore) {
+        gameoverHighscore.style.display = 'block';
+        initialsSection.style.display = 'flex';
+        gameoverMessage.textContent = '';
+        startCountdown();
+      } else {
+        gameoverHighscore.style.display = 'none';
+        initialsSection.style.display = 'none';
+        gameoverMessage.textContent = 'Thanks for playing!';
+        // Auto-submit after 3 seconds if not a high score
+        setTimeout(() => {
+          if (isGameOver) {
+            sendInitials(null);
+          }
+        }, 3000);
+      }
+
+      // Reset initials state
+      currentInitials = ['A', 'A', 'A'];
+      selectedInitialIndex = 0;
+      updateInitialsDisplay();
+
+      // Show overlay
+      gameoverOverlay.classList.add('visible');
+      controllerArea.style.display = 'none';
+    }
+
+    // Start the 20-second countdown timer
+    function startCountdown() {
+      countdownSeconds = 20;
+      countdownTimer.textContent = countdownSeconds;
+      countdownTimer.classList.remove('urgent');
+
+      if (countdownInterval) {
+        clearInterval(countdownInterval);
+      }
+
+      countdownInterval = setInterval(() => {
+        countdownSeconds--;
+        countdownTimer.textContent = countdownSeconds;
+
+        if (countdownSeconds <= 5) {
+          countdownTimer.classList.add('urgent');
+        }
+
+        if (countdownSeconds <= 0) {
+          clearInterval(countdownInterval);
+          // Auto-submit with current initials
+          submitInitials();
+        }
+      }, 1000);
+    }
+
+    // Update the initials display
+    function updateInitialsDisplay() {
+      for (let i = 0; i < 3; i++) {
+        initialLetters[i].textContent = currentInitials[i];
+        initialBoxes[i].classList.toggle('selected', i === selectedInitialIndex);
+      }
+    }
+
+    // Change a letter up or down
+    function changeLetter(index, direction) {
+      let charCode = currentInitials[index].charCodeAt(0);
+      if (direction === 'up') {
+        charCode = charCode >= 90 ? 65 : charCode + 1; // Z -> A, else next
+      } else {
+        charCode = charCode <= 65 ? 90 : charCode - 1; // A -> Z, else prev
+      }
+      currentInitials[index] = String.fromCharCode(charCode);
+      updateInitialsDisplay();
+    }
+
+    // Submit initials to desktop
+    function submitInitials() {
+      if (!isGameOver) return;
+
+      // Stop countdown
+      if (countdownInterval) {
+        clearInterval(countdownInterval);
+        countdownInterval = null;
+      }
+
+      const initials = currentInitials.join('');
+      sendInitials(initials);
+
+      // Update UI
+      initialsSection.style.display = 'none';
+      gameoverMessage.textContent = 'Score saved! Waiting for new game...';
+    }
+
+    // Send initials to desktop
+    function sendInitials(initials) {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({
+          type: 'submit_initials',
+          data: { initials }
+        }));
+      }
+    }
+
+    // Handle room closed - show message
+    function handleRoomClosed() {
+      isGameOver = false;
+
+      // Clear countdown if running
+      if (countdownInterval) {
+        clearInterval(countdownInterval);
+        countdownInterval = null;
+      }
+
+      gameoverOverlay.classList.remove('visible');
+      controllerArea.style.display = 'none';
+
+      // Close WebSocket since room no longer exists
+      if (ws) {
+        ws.close();
+        ws = null;
+      }
+      isConnected = false;
+
+      // Show room expired overlay
+      showReconnectOverlay(
+        'Game Ended',
+        'Scan the QR code to play again',
+        false
+      );
     }
 
     // Send shoot command to desktop
@@ -623,6 +961,40 @@
 
     // Manual reconnect button
     reconnectButton.addEventListener('click', manualReconnect);
+
+    // Initials input - arrow buttons
+    document.querySelectorAll('.initial-arrow').forEach(arrow => {
+      arrow.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const box = arrow.closest('.initial-box');
+        const index = parseInt(box.dataset.index);
+        const direction = arrow.dataset.dir;
+        selectedInitialIndex = index;
+        changeLetter(index, direction);
+      });
+
+      // Touch support
+      arrow.addEventListener('touchend', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const box = arrow.closest('.initial-box');
+        const index = parseInt(box.dataset.index);
+        const direction = arrow.dataset.dir;
+        selectedInitialIndex = index;
+        changeLetter(index, direction);
+      });
+    });
+
+    // Initials input - tap box to select
+    initialBoxes.forEach((box, index) => {
+      box.addEventListener('click', () => {
+        selectedInitialIndex = index;
+        updateInitialsDisplay();
+      });
+    });
+
+    // Submit initials button
+    submitInitialsBtn.addEventListener('click', submitInitials);
 
     // Initialize
     updateJoystickCenter();
