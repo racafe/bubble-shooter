@@ -40,6 +40,10 @@ const FALL_GRAVITY = 800; // Gravity for falling bubbles
 const POINTS_PER_POP = 10;
 const POINTS_PER_FALL = 20;
 
+// Leaderboard constants
+const LEADERBOARD_KEY = 'bubbleShooterLeaderboard';
+const MAX_LEADERBOARD_ENTRIES = 10;
+
 // Grid constants for hexagonal layout
 const GRID_ROWS = 5; // Initial rows of bubbles
 const BUBBLE_DIAMETER = BUBBLE_RADIUS * 2;
@@ -91,6 +95,13 @@ class GameScene extends Phaser.Scene {
     this.warningCountdown = 0;
     this.isGameOver = false;
     this.gameOverOverlay = null;
+    // Leaderboard system
+    this.isHighScore = false;
+    this.leaderboardRank = -1;
+    this.playerInitials = '';
+    this.initialsInput = null;
+    this.selectedLetterIndex = 0;
+    this.initialsLetters = ['A', 'A', 'A'];
   }
 
   init(data) {
@@ -1527,6 +1538,70 @@ class GameScene extends Phaser.Scene {
     return false;
   }
 
+  // Leaderboard management
+  loadLeaderboard() {
+    try {
+      const stored = localStorage.getItem(LEADERBOARD_KEY);
+      if (stored) {
+        return JSON.parse(stored);
+      }
+    } catch {
+      // Ignore localStorage errors
+    }
+    return [];
+  }
+
+  saveLeaderboard(leaderboard) {
+    try {
+      localStorage.setItem(LEADERBOARD_KEY, JSON.stringify(leaderboard));
+    } catch {
+      // Ignore localStorage errors
+    }
+  }
+
+  checkHighScore(score) {
+    const leaderboard = this.loadLeaderboard();
+
+    // If leaderboard has fewer than MAX entries, any score qualifies
+    if (leaderboard.length < MAX_LEADERBOARD_ENTRIES) {
+      return { isHighScore: true, rank: leaderboard.length };
+    }
+
+    // Check if score beats any existing entry
+    for (let i = 0; i < leaderboard.length; i++) {
+      if (score > leaderboard[i].score) {
+        return { isHighScore: true, rank: i };
+      }
+    }
+
+    return { isHighScore: false, rank: -1 };
+  }
+
+  addToLeaderboard(initials, score) {
+    const leaderboard = this.loadLeaderboard();
+    const entry = { initials, score, date: Date.now() };
+
+    // Find insertion point
+    let insertIndex = leaderboard.length;
+    for (let i = 0; i < leaderboard.length; i++) {
+      if (score > leaderboard[i].score) {
+        insertIndex = i;
+        break;
+      }
+    }
+
+    // Insert at the correct position
+    leaderboard.splice(insertIndex, 0, entry);
+
+    // Keep only top 10
+    while (leaderboard.length > MAX_LEADERBOARD_ENTRIES) {
+      leaderboard.pop();
+    }
+
+    this.saveLeaderboard(leaderboard);
+    return leaderboard;
+  }
+
   // Create game over overlay
   createGameOverOverlay(width, height) {
     this.gameOverOverlay = this.add.container(width / 2, height / 2);
@@ -1534,39 +1609,439 @@ class GameScene extends Phaser.Scene {
     this.gameOverOverlay.setVisible(false);
 
     // Dark overlay background
-    const overlay = this.add.rectangle(0, 0, width, height, 0x000000, 0.85);
+    const overlay = this.add.rectangle(0, 0, width, height, 0x000000, 0.9);
+    this.gameOverOverlay.add(overlay);
+  }
+
+  // Build the game over screen content (called when game ends)
+  buildGameOverScreen() {
+    const { height } = this.cameras.main;
+
+    // Clear any previous content except the background overlay
+    while (this.gameOverOverlay.list.length > 1) {
+      const item = this.gameOverOverlay.list[this.gameOverOverlay.list.length - 1];
+      item.destroy();
+      this.gameOverOverlay.remove(item);
+    }
+
+    // Check if this is a high score
+    const { isHighScore, rank } = this.checkHighScore(this.score);
+    this.isHighScore = isHighScore;
+    this.leaderboardRank = rank;
+
+    // Calculate vertical positions based on screen height
+    const topOffset = -height / 2 + 60;
+    let yPos = topOffset;
 
     // Game Over text
-    const gameOverText = this.add.text(0, -60, 'GAME OVER', {
-      fontSize: '48px',
+    const gameOverText = this.add.text(0, yPos, 'GAME OVER', {
+      fontSize: '42px',
       fontFamily: 'Arial, sans-serif',
       color: '#ef4444',
       fontStyle: 'bold'
     }).setOrigin(0.5);
+    this.gameOverOverlay.add(gameOverText);
+    yPos += 60;
 
     // Final score label
-    const scoreLabel = this.add.text(0, 10, 'Final Score', {
-      fontSize: '24px',
+    const scoreLabel = this.add.text(0, yPos, 'Final Score', {
+      fontSize: '20px',
       fontFamily: 'Arial, sans-serif',
       color: '#888888'
     }).setOrigin(0.5);
+    this.gameOverOverlay.add(scoreLabel);
+    yPos += 30;
 
     // Final score value
-    this.finalScoreText = this.add.text(0, 50, '0', {
+    this.finalScoreText = this.add.text(0, yPos, this.score.toString(), {
       fontSize: '48px',
       fontFamily: 'Arial, sans-serif',
       color: '#ffe66d',
       fontStyle: 'bold'
     }).setOrigin(0.5);
+    this.gameOverOverlay.add(this.finalScoreText);
+    yPos += 50;
 
-    // Restart instruction
-    const restartText = this.add.text(0, 120, 'Refresh to play again', {
-      fontSize: '18px',
+    // NEW HIGH SCORE message if applicable
+    if (this.isHighScore) {
+      const highScoreText = this.add.text(0, yPos, '🎉 NEW HIGH SCORE! 🎉', {
+        fontSize: '24px',
+        fontFamily: 'Arial, sans-serif',
+        color: '#4ade80',
+        fontStyle: 'bold'
+      }).setOrigin(0.5);
+      this.gameOverOverlay.add(highScoreText);
+
+      // Pulsing animation for high score text
+      this.tweens.add({
+        targets: highScoreText,
+        scale: 1.1,
+        duration: 500,
+        yoyo: true,
+        repeat: -1,
+        ease: 'Sine.easeInOut'
+      });
+      yPos += 45;
+
+      // Initials input section
+      this.createInitialsInput(yPos);
+      yPos += 80;
+    } else {
+      yPos += 20;
+    }
+
+    // Leaderboard section
+    this.createLeaderboardDisplay(yPos);
+
+    // Play Again button at the bottom
+    this.createPlayAgainButton(height / 2 - 60);
+  }
+
+  // Create initials input for high score entry
+  createInitialsInput(yPos) {
+    // Reset initials state
+    this.initialsLetters = ['A', 'A', 'A'];
+    this.selectedLetterIndex = 0;
+    this.playerInitials = '';
+
+    // Container for initials input
+    this.initialsInput = this.add.container(0, yPos);
+    this.gameOverOverlay.add(this.initialsInput);
+
+    // Instruction text
+    const instructText = this.add.text(0, -25, 'Enter your initials:', {
+      fontSize: '16px',
       fontFamily: 'Arial, sans-serif',
-      color: '#666666'
+      color: '#aaaaaa'
+    }).setOrigin(0.5);
+    this.initialsInput.add(instructText);
+
+    // Letter boxes
+    this.letterTexts = [];
+    this.letterBoxes = [];
+    const boxWidth = 50;
+    const spacing = 60;
+    const startX = -spacing;
+
+    for (let i = 0; i < 3; i++) {
+      const x = startX + i * spacing;
+
+      // Letter box background
+      const box = this.add.rectangle(x, 10, boxWidth, 50, 0x333333, 1);
+      box.setStrokeStyle(3, i === 0 ? 0x4ade80 : 0x666666);
+      this.letterBoxes.push(box);
+      this.initialsInput.add(box);
+
+      // Letter text
+      const letterText = this.add.text(x, 10, this.initialsLetters[i], {
+        fontSize: '32px',
+        fontFamily: 'monospace',
+        color: '#ffffff',
+        fontStyle: 'bold'
+      }).setOrigin(0.5);
+      this.letterTexts.push(letterText);
+      this.initialsInput.add(letterText);
+
+      // Up arrow (interactive)
+      const upArrow = this.add.text(x, -22, '▲', {
+        fontSize: '16px',
+        fontFamily: 'Arial, sans-serif',
+        color: '#888888'
+      }).setOrigin(0.5).setInteractive({ useHandCursor: true });
+      upArrow.on('pointerdown', () => this.changeInitialLetter(i, 1));
+      upArrow.on('pointerover', () => upArrow.setColor('#ffffff'));
+      upArrow.on('pointerout', () => upArrow.setColor('#888888'));
+      this.initialsInput.add(upArrow);
+
+      // Down arrow (interactive)
+      const downArrow = this.add.text(x, 42, '▼', {
+        fontSize: '16px',
+        fontFamily: 'Arial, sans-serif',
+        color: '#888888'
+      }).setOrigin(0.5).setInteractive({ useHandCursor: true });
+      downArrow.on('pointerdown', () => this.changeInitialLetter(i, -1));
+      downArrow.on('pointerover', () => downArrow.setColor('#ffffff'));
+      downArrow.on('pointerout', () => downArrow.setColor('#888888'));
+      this.initialsInput.add(downArrow);
+    }
+
+    // Submit button
+    const submitBtn = this.add.rectangle(0, 75, 120, 35, 0x4ade80, 1);
+    submitBtn.setStrokeStyle(2, 0x22c55e);
+    submitBtn.setInteractive({ useHandCursor: true });
+    submitBtn.on('pointerdown', () => this.submitInitials());
+    submitBtn.on('pointerover', () => submitBtn.setFillStyle(0x22c55e));
+    submitBtn.on('pointerout', () => submitBtn.setFillStyle(0x4ade80));
+    this.initialsInput.add(submitBtn);
+
+    const submitText = this.add.text(0, 75, 'SAVE', {
+      fontSize: '16px',
+      fontFamily: 'Arial, sans-serif',
+      color: '#000000',
+      fontStyle: 'bold'
+    }).setOrigin(0.5);
+    this.initialsInput.add(submitText);
+
+    // Add keyboard support for initials
+    this.input.keyboard.on('keydown', this.handleInitialsKeydown, this);
+  }
+
+  handleInitialsKeydown(event) {
+    if (!this.isGameOver || !this.isHighScore || this.playerInitials) return;
+
+    const key = event.key.toUpperCase();
+
+    // Handle letter input (A-Z)
+    if (/^[A-Z]$/.test(key)) {
+      this.initialsLetters[this.selectedLetterIndex] = key;
+      this.letterTexts[this.selectedLetterIndex].setText(key);
+
+      // Move to next letter
+      if (this.selectedLetterIndex < 2) {
+        this.selectLetterIndex(this.selectedLetterIndex + 1);
+      }
+    }
+    // Arrow keys
+    else if (event.key === 'ArrowUp') {
+      this.changeInitialLetter(this.selectedLetterIndex, 1);
+    }
+    else if (event.key === 'ArrowDown') {
+      this.changeInitialLetter(this.selectedLetterIndex, -1);
+    }
+    else if (event.key === 'ArrowLeft' && this.selectedLetterIndex > 0) {
+      this.selectLetterIndex(this.selectedLetterIndex - 1);
+    }
+    else if (event.key === 'ArrowRight' && this.selectedLetterIndex < 2) {
+      this.selectLetterIndex(this.selectedLetterIndex + 1);
+    }
+    // Enter to submit
+    else if (event.key === 'Enter') {
+      this.submitInitials();
+    }
+  }
+
+  selectLetterIndex(index) {
+    // Update visual selection
+    this.letterBoxes.forEach((box, i) => {
+      box.setStrokeStyle(3, i === index ? 0x4ade80 : 0x666666);
+    });
+    this.selectedLetterIndex = index;
+  }
+
+  changeInitialLetter(index, direction) {
+    if (this.playerInitials) return; // Already submitted
+
+    let charCode = this.initialsLetters[index].charCodeAt(0);
+    charCode += direction;
+
+    // Wrap around A-Z
+    if (charCode > 90) charCode = 65;
+    if (charCode < 65) charCode = 90;
+
+    this.initialsLetters[index] = String.fromCharCode(charCode);
+    this.letterTexts[index].setText(this.initialsLetters[index]);
+
+    // Select this letter box
+    this.selectLetterIndex(index);
+  }
+
+  submitInitials() {
+    if (this.playerInitials) return; // Already submitted
+
+    this.playerInitials = this.initialsLetters.join('');
+
+    // Add to leaderboard and refresh display
+    const updatedLeaderboard = this.addToLeaderboard(this.playerInitials, this.score);
+
+    // Disable initials input (visual feedback)
+    this.letterBoxes.forEach(box => {
+      box.setFillStyle(0x222222);
+      box.setStrokeStyle(3, 0x4ade80);
+    });
+
+    // Remove keyboard listener
+    this.input.keyboard.off('keydown', this.handleInitialsKeydown, this);
+
+    // Update leaderboard display to show the entry highlighted
+    this.updateLeaderboardDisplay(updatedLeaderboard);
+  }
+
+  // Create leaderboard display
+  createLeaderboardDisplay(yPos) {
+    const leaderboard = this.loadLeaderboard();
+
+    // Container for leaderboard
+    this.leaderboardContainer = this.add.container(0, yPos);
+    this.gameOverOverlay.add(this.leaderboardContainer);
+
+    // Leaderboard title
+    const title = this.add.text(0, 0, '🏆 TOP SCORES 🏆', {
+      fontSize: '20px',
+      fontFamily: 'Arial, sans-serif',
+      color: '#fbbf24',
+      fontStyle: 'bold'
+    }).setOrigin(0.5);
+    this.leaderboardContainer.add(title);
+
+    // Leaderboard entries
+    this.leaderboardTexts = [];
+    this.buildLeaderboardEntries(leaderboard, false);
+  }
+
+  buildLeaderboardEntries(leaderboard, highlightNew) {
+    // Clear existing entries
+    this.leaderboardTexts.forEach(text => text.destroy());
+    this.leaderboardTexts = [];
+
+    const startY = 30;
+    const lineHeight = 24;
+
+    if (leaderboard.length === 0) {
+      const emptyText = this.add.text(0, startY + 20, 'No scores yet!', {
+        fontSize: '16px',
+        fontFamily: 'Arial, sans-serif',
+        color: '#666666'
+      }).setOrigin(0.5);
+      this.leaderboardContainer.add(emptyText);
+      this.leaderboardTexts.push(emptyText);
+      return;
+    }
+
+    for (let i = 0; i < Math.min(leaderboard.length, MAX_LEADERBOARD_ENTRIES); i++) {
+      const entry = leaderboard[i];
+      const y = startY + i * lineHeight;
+
+      // Determine if this is the player's new entry
+      const isPlayerEntry = highlightNew &&
+        entry.initials === this.playerInitials &&
+        entry.score === this.score;
+
+      const color = isPlayerEntry ? '#4ade80' : '#ffffff';
+      const rank = `${i + 1}.`.padStart(3, ' ');
+      const initials = entry.initials.padEnd(4, ' ');
+      const scoreStr = entry.score.toString().padStart(6, ' ');
+
+      const entryText = this.add.text(0, y, `${rank} ${initials} ${scoreStr}`, {
+        fontSize: '18px',
+        fontFamily: 'monospace',
+        color: color
+      }).setOrigin(0.5);
+
+      this.leaderboardContainer.add(entryText);
+      this.leaderboardTexts.push(entryText);
+
+      // Highlight animation for new entry
+      if (isPlayerEntry) {
+        this.tweens.add({
+          targets: entryText,
+          alpha: 0.5,
+          duration: 300,
+          yoyo: true,
+          repeat: 2,
+          ease: 'Sine.easeInOut'
+        });
+      }
+    }
+  }
+
+  updateLeaderboardDisplay(leaderboard) {
+    this.buildLeaderboardEntries(leaderboard, true);
+  }
+
+  // Create Play Again button
+  createPlayAgainButton(yPos) {
+    // Button container
+    const btnContainer = this.add.container(0, yPos);
+    this.gameOverOverlay.add(btnContainer);
+
+    // Button background
+    const btnBg = this.add.rectangle(0, 0, 180, 50, 0x3b82f6, 1);
+    btnBg.setStrokeStyle(3, 0x60a5fa);
+    btnBg.setInteractive({ useHandCursor: true });
+
+    // Button text
+    const btnText = this.add.text(0, 0, 'PLAY AGAIN', {
+      fontSize: '22px',
+      fontFamily: 'Arial, sans-serif',
+      color: '#ffffff',
+      fontStyle: 'bold'
     }).setOrigin(0.5);
 
-    this.gameOverOverlay.add([overlay, gameOverText, scoreLabel, this.finalScoreText, restartText]);
+    btnContainer.add([btnBg, btnText]);
+
+    // Hover effects
+    btnBg.on('pointerover', () => {
+      btnBg.setFillStyle(0x60a5fa);
+      btnText.setScale(1.05);
+    });
+
+    btnBg.on('pointerout', () => {
+      btnBg.setFillStyle(0x3b82f6);
+      btnText.setScale(1);
+    });
+
+    // Click to restart
+    btnBg.on('pointerdown', () => {
+      this.restartGame();
+    });
+  }
+
+  // Restart the game without rescanning QR
+  restartGame() {
+    // Reset game state
+    this.isGameOver = false;
+    this.isPaused = false;
+    this.score = 0;
+    this.scoreText.setText('0');
+    this.availableColorCount = 4;
+    this.isHighScore = false;
+    this.leaderboardRank = -1;
+    this.playerInitials = '';
+
+    // Remove keyboard listener if still attached
+    this.input.keyboard.off('keydown', this.handleInitialsKeydown, this);
+
+    // Clear all grid bubbles
+    for (const bubble of this.gridBubbles) {
+      if (bubble.sprite) bubble.sprite.destroy();
+      if (bubble.shine) bubble.shine.destroy();
+    }
+    this.gridBubbles = [];
+
+    // Clear falling bubbles
+    for (const bubble of this.fallingBubbles) {
+      if (bubble.sprite) bubble.sprite.destroy();
+      if (bubble.shine) bubble.shine.destroy();
+    }
+    this.fallingBubbles = [];
+
+    // Clear shooting bubble if any
+    if (this.shootingBubble) {
+      if (this.shootingBubble.shine) this.shootingBubble.shine.destroy();
+      this.shootingBubble.destroy();
+      this.shootingBubble = null;
+    }
+
+    // Clear trajectory
+    this.trajectoryGraphics.clear();
+
+    // Hide game over overlay
+    this.gameOverOverlay.setVisible(false);
+
+    // Reset bubble colors
+    this.currentBubbleColor = this.getRandomAvailableColor();
+    this.nextBubbleColor = this.getRandomAvailableColor();
+    this.currentBubble.setFillStyle(this.currentBubbleColor);
+    this.nextBubble.setFillStyle(this.nextBubbleColor);
+
+    // Reset descent interval
+    this.descentInterval = INITIAL_DESCENT_INTERVAL;
+
+    // Create new initial bubbles
+    this.createInitialBubbles();
+
+    // Start descent timer
+    this.startDescentTimer();
   }
 
   // Trigger game over state
@@ -1583,19 +2058,19 @@ class GameScene extends Phaser.Scene {
     }
     this.hideWarningIndicator();
 
-    // Update final score
-    this.finalScoreText.setText(this.score.toString());
+    // Build the game over screen with leaderboard
+    this.buildGameOverScreen();
 
     // Show game over overlay with animation
     this.gameOverOverlay.setVisible(true);
     this.gameOverOverlay.setAlpha(0);
-    this.gameOverOverlay.setScale(0.8);
+    this.gameOverOverlay.setScale(0.9);
 
     this.tweens.add({
       targets: this.gameOverOverlay,
       alpha: 1,
       scale: 1,
-      duration: 500,
+      duration: 400,
       ease: 'Back.easeOut'
     });
   }
