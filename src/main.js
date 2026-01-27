@@ -19,6 +19,11 @@ const BUBBLE_COLORS = [
 const BUBBLE_SPEED = 800;
 const BUBBLE_RADIUS = 20;
 
+// Grid constants for hexagonal layout
+const GRID_ROWS = 5; // Initial rows of bubbles
+const BUBBLE_DIAMETER = BUBBLE_RADIUS * 2;
+const ROW_HEIGHT = BUBBLE_DIAMETER * 0.866; // sqrt(3)/2 for hex packing
+
 class GameScene extends Phaser.Scene {
   constructor() {
     super({ key: 'GameScene' });
@@ -29,6 +34,11 @@ class GameScene extends Phaser.Scene {
     this.isAiming = false;
     this.aimAngle = 90; // Default to straight up (degrees)
     this.trajectoryGraphics = null;
+    // Grid system for attached bubbles
+    this.gridBubbles = []; // Array of {x, y, row, col, color, sprite, shine}
+    this.gridStartY = 0; // Y position of first row (set after walls created)
+    this.gridStartX = 0; // X position of first bubble in row 0
+    this.bubblesPerRow = 0; // Calculated based on game area width
   }
 
   init(data) {
@@ -57,6 +67,12 @@ class GameScene extends Phaser.Scene {
 
     // Create trajectory preview graphics
     this.trajectoryGraphics = this.add.graphics();
+
+    // Initialize the bubble grid
+    this.initializeGrid(width);
+
+    // Create initial rows of bubbles
+    this.createInitialBubbles();
 
     // Listen for shoot and aim commands from controller
     if (this.ws) {
@@ -106,6 +122,13 @@ class GameScene extends Phaser.Scene {
       return;
     }
 
+    // Check for collision with existing grid bubbles
+    const collisionBubble = this.checkGridCollision(bubble.x, bubble.y);
+    if (collisionBubble) {
+      this.stickBubble(bubble);
+      return;
+    }
+
     // Rotate bubble while moving
     bubble.rotation += bubble.rotationSpeed * delta;
 
@@ -115,6 +138,20 @@ class GameScene extends Phaser.Scene {
     }
   }
 
+  checkGridCollision(x, y) {
+    // Check if shooting bubble collides with any grid bubble
+    const collisionDist = BUBBLE_DIAMETER * 0.9; // Slightly less than 2 radii for snug fit
+
+    for (const gridBubble of this.gridBubbles) {
+      const dist = Phaser.Math.Distance.Between(x, y, gridBubble.x, gridBubble.y);
+      if (dist < collisionDist) {
+        return gridBubble;
+      }
+    }
+
+    return null;
+  }
+
   stickBubble(bubble) {
     // Stop the bubble and mark it as stuck
     bubble.velocityX = 0;
@@ -122,9 +159,98 @@ class GameScene extends Phaser.Scene {
     bubble.rotationSpeed = 0;
     bubble.active = false;
 
-    // Future: Add to grid, check for matches
-    // For now, just leave it where it stuck
+    // Find the nearest valid empty cell
+    const targetCell = this.findNearestEmptyCell(bubble.x, bubble.y);
+
+    if (targetCell && this.hasAdjacentBubble(targetCell.row, targetCell.col)) {
+      // Animate snap to grid position
+      this.snapBubbleToGrid(bubble, targetCell);
+    } else {
+      // No valid position found - shouldn't happen normally
+      // Destroy the bubble
+      if (bubble.shine) bubble.shine.destroy();
+      bubble.destroy();
+    }
+
     this.shootingBubble = null;
+  }
+
+  snapBubbleToGrid(bubble, targetCell) {
+    const targetPos = targetCell.pos;
+
+    // Create snap animation using tween
+    this.tweens.add({
+      targets: bubble,
+      x: targetPos.x,
+      y: targetPos.y,
+      duration: 50, // Quick snap
+      ease: 'Power2',
+      onUpdate: () => {
+        // Update shine position during tween
+        if (bubble.shine) {
+          bubble.shine.x = bubble.x - 6;
+          bubble.shine.y = bubble.y - 6;
+        }
+      },
+      onComplete: () => {
+        // Create the visual snap effect
+        this.createSnapEffect(targetPos.x, targetPos.y);
+
+        // Destroy the shooting bubble visuals
+        if (bubble.shine) bubble.shine.destroy();
+        bubble.destroy();
+
+        // Add bubble to grid data structure
+        this.addBubbleToGrid(targetCell.row, targetCell.col, bubble.color);
+      }
+    });
+  }
+
+  createSnapEffect(x, y) {
+    // Create a satisfying visual "pop" effect when bubble snaps to grid
+    const ring = this.add.circle(x, y, BUBBLE_RADIUS, 0xffffff, 0);
+    ring.setStrokeStyle(3, 0xffffff, 0.8);
+
+    // Expand and fade ring
+    this.tweens.add({
+      targets: ring,
+      radius: BUBBLE_RADIUS * 1.5,
+      alpha: 0,
+      duration: 200,
+      ease: 'Quad.easeOut',
+      onUpdate: () => {
+        // Update stroke as ring expands
+        ring.setStrokeStyle(3 * (1 - ring.alpha), 0xffffff, ring.alpha * 0.8);
+      },
+      onComplete: () => {
+        ring.destroy();
+      }
+    });
+
+    // Add small particles bursting outward
+    for (let i = 0; i < 6; i++) {
+      const angle = (i / 6) * Math.PI * 2;
+      const particle = this.add.circle(
+        x + Math.cos(angle) * BUBBLE_RADIUS * 0.5,
+        y + Math.sin(angle) * BUBBLE_RADIUS * 0.5,
+        3,
+        0xffffff,
+        0.7
+      );
+
+      this.tweens.add({
+        targets: particle,
+        x: x + Math.cos(angle) * BUBBLE_RADIUS * 1.8,
+        y: y + Math.sin(angle) * BUBBLE_RADIUS * 1.8,
+        alpha: 0,
+        scale: 0.3,
+        duration: 150,
+        ease: 'Quad.easeOut',
+        onComplete: () => {
+          particle.destroy();
+        }
+      });
+    }
   }
 
   handleAim(angle) {
@@ -311,6 +437,156 @@ class GameScene extends Phaser.Scene {
     );
   }
 
+  initializeGrid(_width) {
+    // Calculate grid parameters based on game area
+    const gameAreaWidth = this.gameArea.right - this.gameArea.left;
+    this.bubblesPerRow = Math.floor(gameAreaWidth / BUBBLE_DIAMETER);
+
+    // Center the grid within the game area
+    const totalGridWidth = this.bubblesPerRow * BUBBLE_DIAMETER;
+    const leftPadding = (gameAreaWidth - totalGridWidth) / 2;
+    this.gridStartX = this.gameArea.left + leftPadding + BUBBLE_RADIUS;
+    this.gridStartY = this.gameArea.top + BUBBLE_RADIUS;
+  }
+
+  createInitialBubbles() {
+    // Create GRID_ROWS of bubbles at the top
+    for (let row = 0; row < GRID_ROWS; row++) {
+      // Odd rows have one fewer bubble and are offset
+      const isOddRow = row % 2 === 1;
+      const bubblesInRow = isOddRow ? this.bubblesPerRow - 1 : this.bubblesPerRow;
+
+      for (let col = 0; col < bubblesInRow; col++) {
+        const color = Phaser.Utils.Array.GetRandom(BUBBLE_COLORS);
+        this.addBubbleToGrid(row, col, color);
+      }
+    }
+  }
+
+  getGridPosition(row, col) {
+    // Calculate world position from grid row/col
+    const isOddRow = row % 2 === 1;
+    const xOffset = isOddRow ? BUBBLE_RADIUS : 0;
+
+    const x = this.gridStartX + col * BUBBLE_DIAMETER + xOffset;
+    const y = this.gridStartY + row * ROW_HEIGHT;
+
+    return { x, y };
+  }
+
+  getGridCell(worldX, worldY) {
+    // Convert world position to nearest grid cell
+    const row = Math.round((worldY - this.gridStartY) / ROW_HEIGHT);
+    const isOddRow = row % 2 === 1;
+    const xOffset = isOddRow ? BUBBLE_RADIUS : 0;
+    const col = Math.round((worldX - this.gridStartX - xOffset) / BUBBLE_DIAMETER);
+
+    return { row, col };
+  }
+
+  isValidGridCell(row, col) {
+    // Check if a grid cell is valid (within bounds)
+    if (row < 0) return false;
+    const isOddRow = row % 2 === 1;
+    const maxCols = isOddRow ? this.bubblesPerRow - 1 : this.bubblesPerRow;
+    return col >= 0 && col < maxCols;
+  }
+
+  getBubbleAtCell(row, col) {
+    // Find bubble at specific grid cell
+    return this.gridBubbles.find(b => b.row === row && b.col === col);
+  }
+
+  addBubbleToGrid(row, col, color) {
+    // Check if cell is valid
+    if (!this.isValidGridCell(row, col)) return null;
+
+    // Check if cell is already occupied
+    if (this.getBubbleAtCell(row, col)) return null;
+
+    const pos = this.getGridPosition(row, col);
+
+    // Create bubble sprite
+    const sprite = this.add.circle(pos.x, pos.y, BUBBLE_RADIUS, color)
+      .setStrokeStyle(2, 0xffffff, 0.6);
+
+    // Add shine effect
+    const shine = this.add.circle(pos.x - 6, pos.y - 6, 4, 0xffffff, 0.5);
+
+    const bubbleData = {
+      row,
+      col,
+      x: pos.x,
+      y: pos.y,
+      color,
+      sprite,
+      shine
+    };
+
+    this.gridBubbles.push(bubbleData);
+    return bubbleData;
+  }
+
+  findNearestEmptyCell(worldX, worldY) {
+    // Find the best empty cell near the given position
+    const cell = this.getGridCell(worldX, worldY);
+
+    // Check the calculated cell and nearby cells for the best fit
+    const candidates = [];
+
+    // Check cells in a small area around the impact point
+    for (let dr = -1; dr <= 1; dr++) {
+      for (let dc = -1; dc <= 1; dc++) {
+        const testRow = cell.row + dr;
+        const testCol = cell.col + dc;
+
+        if (this.isValidGridCell(testRow, testCol) && !this.getBubbleAtCell(testRow, testCol)) {
+          const pos = this.getGridPosition(testRow, testCol);
+          const dist = Phaser.Math.Distance.Between(worldX, worldY, pos.x, pos.y);
+          candidates.push({ row: testRow, col: testCol, dist, pos });
+        }
+      }
+    }
+
+    // Return the closest valid empty cell
+    if (candidates.length > 0) {
+      candidates.sort((a, b) => a.dist - b.dist);
+      return candidates[0];
+    }
+
+    return null;
+  }
+
+  getNeighbors(row, col) {
+    // Get all valid neighboring cells for hexagonal grid
+    const isOddRow = row % 2 === 1;
+    const neighbors = [];
+
+    // Even rows: (-1,-1), (-1,0), (0,-1), (0,1), (1,-1), (1,0)
+    // Odd rows:  (-1,0), (-1,1), (0,-1), (0,1), (1,0), (1,1)
+    const offsets = isOddRow
+      ? [[-1, 0], [-1, 1], [0, -1], [0, 1], [1, 0], [1, 1]]
+      : [[-1, -1], [-1, 0], [0, -1], [0, 1], [1, -1], [1, 0]];
+
+    for (const [dr, dc] of offsets) {
+      const newRow = row + dr;
+      const newCol = col + dc;
+      if (this.isValidGridCell(newRow, newCol)) {
+        neighbors.push({ row: newRow, col: newCol });
+      }
+    }
+
+    return neighbors;
+  }
+
+  hasAdjacentBubble(row, col) {
+    // Check if position has at least one adjacent bubble (or is in top row)
+    if (row === 0) return true; // Top row is always connected to ceiling
+
+    const neighbors = this.getNeighbors(row, col);
+    return neighbors.some(n => this.getBubbleAtCell(n.row, n.col) !== undefined);
+  }
+
   handleShoot(angle) {
     // Don't shoot if already shooting
     if (this.shootingBubble && this.shootingBubble.active) {
@@ -395,8 +671,9 @@ class GameScene extends Phaser.Scene {
     let bounces = 0;
     const stepSize = 10;
     const maxSteps = 200;
+    let hitBubble = false;
 
-    for (let step = 0; step < maxSteps && bounces <= maxBounces; step++) {
+    for (let step = 0; step < maxSteps && bounces <= maxBounces && !hitBubble; step++) {
       x += dx * stepSize;
       y += dy * stepSize;
 
@@ -416,6 +693,13 @@ class GameScene extends Phaser.Scene {
       // Check ceiling
       if (y - BUBBLE_RADIUS <= this.gameArea.top) {
         y = this.gameArea.top + BUBBLE_RADIUS;
+        points.push({ x, y });
+        break;
+      }
+
+      // Check collision with grid bubbles
+      if (this.checkGridCollision(x, y)) {
+        hitBubble = true;
         points.push({ x, y });
         break;
       }
