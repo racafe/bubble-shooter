@@ -45,6 +45,19 @@ const GRID_ROWS = 5; // Initial rows of bubbles
 const BUBBLE_DIAMETER = BUBBLE_RADIUS * 2;
 const ROW_HEIGHT = BUBBLE_DIAMETER * 0.866; // sqrt(3)/2 for hex packing
 
+// Descent constants for endless mode
+const INITIAL_DESCENT_INTERVAL = 30000; // 30 seconds initial interval
+const MIN_DESCENT_INTERVAL = 15000; // 15 seconds minimum
+const DESCENT_WARNING_TIME = 3000; // 3 second warning before descent
+const DESCENT_SPEED_THRESHOLDS = [
+  { score: 0, interval: 30000 },
+  { score: 500, interval: 27000 },
+  { score: 1000, interval: 24000 },
+  { score: 2000, interval: 21000 },
+  { score: 3500, interval: 18000 },
+  { score: 5000, interval: 15000 },
+];
+
 class GameScene extends Phaser.Scene {
   constructor() {
     super({ key: 'GameScene' });
@@ -70,6 +83,14 @@ class GameScene extends Phaser.Scene {
     this.availableColorCount = 4; // Start with 4 colors
     this.newColorIndicator = null;
     this.newColorTimeout = null;
+    // Descent system for endless mode
+    this.descentInterval = INITIAL_DESCENT_INTERVAL;
+    this.descentTimer = null;
+    this.warningTimer = null;
+    this.warningIndicator = null;
+    this.warningCountdown = 0;
+    this.isGameOver = false;
+    this.gameOverOverlay = null;
   }
 
   init(data) {
@@ -107,6 +128,15 @@ class GameScene extends Phaser.Scene {
 
     // Create disconnect overlay (initially hidden)
     this.createDisconnectOverlay(width, height);
+
+    // Create game over overlay (initially hidden)
+    this.createGameOverOverlay(width, height);
+
+    // Create descent warning indicator (initially hidden)
+    this.createWarningIndicator(width, height);
+
+    // Start the descent timer for endless mode
+    this.startDescentTimer();
 
     // Listen for shoot and aim commands from controller
     if (this.ws) {
@@ -1252,6 +1282,322 @@ class GameScene extends Phaser.Scene {
 
     // Check if we've unlocked new colors
     this.checkColorProgression();
+
+    // Update descent interval based on new score
+    this.updateDescentInterval();
+  }
+
+  // Calculate descent interval based on current score
+  getDescentIntervalForScore() {
+    let interval = INITIAL_DESCENT_INTERVAL;
+    for (const threshold of DESCENT_SPEED_THRESHOLDS) {
+      if (this.score >= threshold.score) {
+        interval = threshold.interval;
+      }
+    }
+    return Math.max(interval, MIN_DESCENT_INTERVAL);
+  }
+
+  // Update descent interval when score changes
+  updateDescentInterval() {
+    const newInterval = this.getDescentIntervalForScore();
+    if (newInterval !== this.descentInterval) {
+      this.descentInterval = newInterval;
+      // Restart timer with new interval if not in warning phase
+      if (this.descentTimer && !this.warningTimer) {
+        this.descentTimer.remove();
+        this.startDescentTimer();
+      }
+    }
+  }
+
+  // Start the descent timer
+  startDescentTimer() {
+    if (this.isGameOver) return;
+
+    // Calculate time until warning (interval minus warning time)
+    const timeUntilWarning = this.descentInterval - DESCENT_WARNING_TIME;
+
+    this.descentTimer = this.time.delayedCall(timeUntilWarning, () => {
+      this.startWarningCountdown();
+    });
+  }
+
+  // Start the 3-second warning countdown
+  startWarningCountdown() {
+    if (this.isGameOver || this.isPaused) {
+      // Restart full timer if paused
+      this.startDescentTimer();
+      return;
+    }
+
+    this.warningCountdown = 3;
+    this.showWarningIndicator();
+
+    // Update countdown every second
+    this.warningTimer = this.time.addEvent({
+      delay: 1000,
+      repeat: 2,
+      callback: () => {
+        this.warningCountdown--;
+        this.updateWarningDisplay();
+
+        if (this.warningCountdown <= 0) {
+          this.hideWarningIndicator();
+          this.descendGrid();
+        }
+      }
+    });
+  }
+
+  // Create warning indicator UI
+  createWarningIndicator(width, _height) {
+    this.warningIndicator = this.add.container(width / 2, 100);
+    this.warningIndicator.setDepth(60);
+    this.warningIndicator.setVisible(false);
+
+    // Warning background panel
+    const warningPanel = this.add.rectangle(0, 0, 200, 60, 0xff0000, 0.8);
+    warningPanel.setStrokeStyle(3, 0xffffff, 1);
+
+    // Warning text
+    this.warningText = this.add.text(0, -10, 'DESCENDING!', {
+      fontSize: '18px',
+      fontFamily: 'Arial, sans-serif',
+      color: '#ffffff',
+      fontStyle: 'bold'
+    }).setOrigin(0.5);
+
+    // Countdown number
+    this.warningCountdownText = this.add.text(0, 15, '3', {
+      fontSize: '24px',
+      fontFamily: 'Arial, sans-serif',
+      color: '#ffffff',
+      fontStyle: 'bold'
+    }).setOrigin(0.5);
+
+    this.warningIndicator.add([warningPanel, this.warningText, this.warningCountdownText]);
+  }
+
+  // Show warning indicator with animation
+  showWarningIndicator() {
+    this.warningCountdownText.setText('3');
+    this.warningIndicator.setVisible(true);
+    this.warningIndicator.setAlpha(0);
+    this.warningIndicator.setScale(0.5);
+
+    this.tweens.add({
+      targets: this.warningIndicator,
+      alpha: 1,
+      scale: 1,
+      duration: 200,
+      ease: 'Back.easeOut'
+    });
+
+    // Pulsing animation
+    this.warningPulse = this.tweens.add({
+      targets: this.warningIndicator,
+      scaleX: 1.1,
+      scaleY: 1.1,
+      duration: 300,
+      yoyo: true,
+      repeat: -1,
+      ease: 'Sine.easeInOut'
+    });
+  }
+
+  // Update warning countdown display
+  updateWarningDisplay() {
+    if (this.warningCountdown > 0) {
+      this.warningCountdownText.setText(this.warningCountdown.toString());
+    }
+  }
+
+  // Hide warning indicator
+  hideWarningIndicator() {
+    if (this.warningPulse) {
+      this.warningPulse.stop();
+    }
+
+    this.tweens.add({
+      targets: this.warningIndicator,
+      alpha: 0,
+      scale: 0.5,
+      duration: 150,
+      onComplete: () => {
+        this.warningIndicator.setVisible(false);
+      }
+    });
+
+    this.warningTimer = null;
+  }
+
+  // Descend the entire grid by one row
+  descendGrid() {
+    if (this.isGameOver) return;
+
+    // Move all existing bubbles down by one row visually
+    for (const bubble of this.gridBubbles) {
+      bubble.row += 1;
+      const newPos = this.getGridPosition(bubble.row, bubble.col);
+      bubble.y = newPos.y;
+      bubble.x = newPos.x; // X might change due to odd/even row offset
+
+      // Animate the descent
+      this.tweens.add({
+        targets: [bubble.sprite, bubble.shine],
+        y: newPos.y,
+        x: (target) => target === bubble.shine ? newPos.x - 6 : newPos.x,
+        duration: 200,
+        ease: 'Quad.easeOut',
+        onUpdate: () => {
+          if (bubble.shine) {
+            bubble.shine.y = bubble.sprite.y - 6;
+            bubble.shine.x = bubble.sprite.x - 6;
+          }
+        }
+      });
+    }
+
+    // Add new row at the top (row 0)
+    this.addNewTopRow();
+
+    // Check for game over after descent
+    this.time.delayedCall(250, () => {
+      if (this.checkGameOver()) {
+        this.triggerGameOver();
+      } else {
+        // Start next descent timer
+        this.startDescentTimer();
+      }
+    });
+  }
+
+  // Add a new row of bubbles at the top
+  addNewTopRow() {
+    // Determine if new row 0 should be odd or even based on descent count
+    // After descent, the old row 0 becomes row 1, so new row 0 follows standard pattern
+    const bubblesInRow = this.bubblesPerRow; // Row 0 is always full
+
+    for (let col = 0; col < bubblesInRow; col++) {
+      const color = this.getRandomAvailableColor();
+      const pos = this.getGridPosition(0, col);
+
+      // Create bubble sprite (start above screen and animate in)
+      const sprite = this.add.circle(pos.x, pos.y - ROW_HEIGHT, BUBBLE_RADIUS, color)
+        .setStrokeStyle(2, 0xffffff, 0.6);
+
+      const shine = this.add.circle(pos.x - 6, pos.y - ROW_HEIGHT - 6, 4, 0xffffff, 0.5);
+
+      const bubbleData = {
+        row: 0,
+        col,
+        x: pos.x,
+        y: pos.y,
+        color,
+        sprite,
+        shine
+      };
+
+      this.gridBubbles.push(bubbleData);
+
+      // Animate the new bubble sliding in
+      this.tweens.add({
+        targets: sprite,
+        y: pos.y,
+        duration: 200,
+        ease: 'Quad.easeOut'
+      });
+      this.tweens.add({
+        targets: shine,
+        y: pos.y - 6,
+        duration: 200,
+        ease: 'Quad.easeOut'
+      });
+    }
+  }
+
+  // Check if any bubble has crossed the bottom boundary
+  checkGameOver() {
+    for (const bubble of this.gridBubbles) {
+      if (bubble.y + BUBBLE_RADIUS >= this.gameArea.bottom) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // Create game over overlay
+  createGameOverOverlay(width, height) {
+    this.gameOverOverlay = this.add.container(width / 2, height / 2);
+    this.gameOverOverlay.setDepth(150);
+    this.gameOverOverlay.setVisible(false);
+
+    // Dark overlay background
+    const overlay = this.add.rectangle(0, 0, width, height, 0x000000, 0.85);
+
+    // Game Over text
+    const gameOverText = this.add.text(0, -60, 'GAME OVER', {
+      fontSize: '48px',
+      fontFamily: 'Arial, sans-serif',
+      color: '#ef4444',
+      fontStyle: 'bold'
+    }).setOrigin(0.5);
+
+    // Final score label
+    const scoreLabel = this.add.text(0, 10, 'Final Score', {
+      fontSize: '24px',
+      fontFamily: 'Arial, sans-serif',
+      color: '#888888'
+    }).setOrigin(0.5);
+
+    // Final score value
+    this.finalScoreText = this.add.text(0, 50, '0', {
+      fontSize: '48px',
+      fontFamily: 'Arial, sans-serif',
+      color: '#ffe66d',
+      fontStyle: 'bold'
+    }).setOrigin(0.5);
+
+    // Restart instruction
+    const restartText = this.add.text(0, 120, 'Refresh to play again', {
+      fontSize: '18px',
+      fontFamily: 'Arial, sans-serif',
+      color: '#666666'
+    }).setOrigin(0.5);
+
+    this.gameOverOverlay.add([overlay, gameOverText, scoreLabel, this.finalScoreText, restartText]);
+  }
+
+  // Trigger game over state
+  triggerGameOver() {
+    this.isGameOver = true;
+    this.isPaused = true;
+
+    // Stop all timers
+    if (this.descentTimer) {
+      this.descentTimer.remove();
+    }
+    if (this.warningTimer) {
+      this.warningTimer.remove();
+    }
+    this.hideWarningIndicator();
+
+    // Update final score
+    this.finalScoreText.setText(this.score.toString());
+
+    // Show game over overlay with animation
+    this.gameOverOverlay.setVisible(true);
+    this.gameOverOverlay.setAlpha(0);
+    this.gameOverOverlay.setScale(0.8);
+
+    this.tweens.add({
+      targets: this.gameOverOverlay,
+      alpha: 1,
+      scale: 1,
+      duration: 500,
+      ease: 'Back.easeOut'
+    });
   }
 }
 
