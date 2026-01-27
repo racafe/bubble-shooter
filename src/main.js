@@ -5,6 +5,257 @@ import QRCode from 'qrcode';
 const WS_URL = `ws://${window.location.hostname}:3000`;
 const CONTROLLER_BASE_URL = `http://${window.location.hostname}:5173/controller.html`;
 
+// Bubble colors for the game
+const BUBBLE_COLORS = [
+  0xff6b6b, // Red
+  0x4ecdc4, // Teal
+  0xffe66d, // Yellow
+  0x95e1d3, // Mint
+  0xf38181, // Coral
+  0xaa96da, // Purple
+];
+
+class GameScene extends Phaser.Scene {
+  constructor() {
+    super({ key: 'GameScene' });
+    this.score = 0;
+    this.currentBubbleColor = null;
+    this.nextBubbleColor = null;
+  }
+
+  init(data) {
+    // Receive WebSocket connection from WaitingScene
+    this.ws = data.ws;
+  }
+
+  create() {
+    const { width, height } = this.cameras.main;
+
+    // Create cartoon-style gradient background
+    this.createGradientBackground(width, height);
+
+    // Create visible wall boundaries
+    this.createWalls(width, height);
+
+    // Create score display in top-left corner
+    this.createScoreDisplay();
+
+    // Initialize bubble colors
+    this.currentBubbleColor = Phaser.Utils.Array.GetRandom(BUBBLE_COLORS);
+    this.nextBubbleColor = Phaser.Utils.Array.GetRandom(BUBBLE_COLORS);
+
+    // Create shooter and bubble displays at bottom-center
+    this.createShooter(width, height);
+
+    // Listen for shoot commands from controller
+    if (this.ws) {
+      this.ws.onmessage = (event) => {
+        const message = JSON.parse(event.data);
+        if (message.type === 'game_message' && message.data.type === 'shoot') {
+          this.handleShoot(message.data.angle);
+        }
+      };
+    }
+  }
+
+  createGradientBackground(width, height) {
+    // Create a gradient texture programmatically
+    const gradientTexture = this.textures.createCanvas('gradient-bg', width, height);
+    const ctx = gradientTexture.getContext();
+
+    // Cartoon-style gradient from sky blue to soft purple
+    const gradient = ctx.createLinearGradient(0, 0, 0, height);
+    gradient.addColorStop(0, '#667eea');    // Purple-blue at top
+    gradient.addColorStop(0.5, '#764ba2');  // Purple in middle
+    gradient.addColorStop(1, '#f093fb');    // Pink-purple at bottom
+
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, width, height);
+
+    gradientTexture.refresh();
+
+    // Add the background image
+    this.add.image(width / 2, height / 2, 'gradient-bg');
+  }
+
+  createWalls(width, height) {
+    const wallThickness = 10;
+    const wallColor = 0x2d3436;
+    const wallAlpha = 0.8;
+
+    // Game area dimensions (leave space for UI)
+    const gameTop = 60;  // Space for score
+    const gameBottom = height - 100;  // Space for shooter
+    const gameLeft = 20;
+    const gameRight = width - 20;
+
+    // Left wall
+    this.add.rectangle(
+      gameLeft,
+      (gameTop + gameBottom) / 2,
+      wallThickness,
+      gameBottom - gameTop,
+      wallColor,
+      wallAlpha
+    ).setStrokeStyle(2, 0xffffff, 0.3);
+
+    // Right wall
+    this.add.rectangle(
+      gameRight,
+      (gameTop + gameBottom) / 2,
+      wallThickness,
+      gameBottom - gameTop,
+      wallColor,
+      wallAlpha
+    ).setStrokeStyle(2, 0xffffff, 0.3);
+
+    // Top wall
+    this.add.rectangle(
+      width / 2,
+      gameTop,
+      gameRight - gameLeft,
+      wallThickness,
+      wallColor,
+      wallAlpha
+    ).setStrokeStyle(2, 0xffffff, 0.3);
+
+    // Bottom boundary line (dashed effect with multiple segments)
+    const dashWidth = 20;
+    const gapWidth = 10;
+    let x = gameLeft + dashWidth / 2;
+
+    while (x < gameRight) {
+      this.add.rectangle(
+        x,
+        gameBottom,
+        dashWidth,
+        4,
+        0xffffff,
+        0.5
+      );
+      x += dashWidth + gapWidth;
+    }
+
+    // Store game area bounds for later use
+    this.gameArea = {
+      left: gameLeft + wallThickness / 2,
+      right: gameRight - wallThickness / 2,
+      top: gameTop + wallThickness / 2,
+      bottom: gameBottom
+    };
+  }
+
+  createScoreDisplay() {
+    // Score background panel
+    this.add.rectangle(80, 30, 140, 40, 0x000000, 0.4)
+      .setStrokeStyle(2, 0xffffff, 0.3);
+
+    // Score label
+    this.add.text(20, 20, 'SCORE', {
+      fontSize: '14px',
+      fontFamily: 'Arial, sans-serif',
+      color: '#ffffff',
+      fontStyle: 'bold'
+    });
+
+    // Score value
+    this.scoreText = this.add.text(20, 35, '0', {
+      fontSize: '20px',
+      fontFamily: 'Arial, sans-serif',
+      color: '#ffe66d',
+      fontStyle: 'bold'
+    });
+  }
+
+  createShooter(width, height) {
+    const shooterY = height - 50;
+    const shooterX = width / 2;
+
+    // Shooter base (semi-circle platform)
+    this.add.arc(shooterX, shooterY + 20, 50, 180, 0, false, 0x2d3436, 0.9)
+      .setStrokeStyle(3, 0xffffff, 0.4);
+
+    // Shooter cannon/tube
+    this.shooterCannon = this.add.rectangle(
+      shooterX,
+      shooterY - 10,
+      16,
+      40,
+      0x636e72,
+      1
+    ).setStrokeStyle(2, 0xffffff, 0.5);
+
+    // Current bubble to shoot (positioned at cannon tip)
+    this.currentBubble = this.add.circle(
+      shooterX,
+      shooterY - 35,
+      20,
+      this.currentBubbleColor
+    ).setStrokeStyle(3, 0xffffff, 0.8);
+
+    // Add shine effect to current bubble
+    this.add.circle(
+      shooterX - 6,
+      shooterY - 41,
+      5,
+      0xffffff,
+      0.6
+    );
+
+    // Next bubble preview (smaller, to the right)
+    const previewX = shooterX + 80;
+    const previewY = shooterY;
+
+    // Preview label
+    this.add.text(previewX - 25, previewY - 35, 'NEXT', {
+      fontSize: '12px',
+      fontFamily: 'Arial, sans-serif',
+      color: '#ffffff',
+      fontStyle: 'bold'
+    });
+
+    // Preview bubble background
+    this.add.circle(previewX, previewY, 18, 0x000000, 0.3)
+      .setStrokeStyle(2, 0xffffff, 0.3);
+
+    // Next bubble preview
+    this.nextBubble = this.add.circle(
+      previewX,
+      previewY,
+      15,
+      this.nextBubbleColor
+    ).setStrokeStyle(2, 0xffffff, 0.6);
+
+    // Add shine to preview bubble
+    this.add.circle(
+      previewX - 4,
+      previewY - 4,
+      3,
+      0xffffff,
+      0.5
+    );
+  }
+
+  handleShoot(_angle) {
+    // For now, just cycle the bubbles as visual feedback
+    // Full shooting mechanics will be implemented in later stories
+    // _angle parameter will be used for actual shooting trajectory
+
+    // Move next bubble to current
+    this.currentBubbleColor = this.nextBubbleColor;
+    this.currentBubble.setFillStyle(this.currentBubbleColor);
+
+    // Generate new next bubble
+    this.nextBubbleColor = Phaser.Utils.Array.GetRandom(BUBBLE_COLORS);
+    this.nextBubble.setFillStyle(this.nextBubbleColor);
+  }
+
+  updateScore(points) {
+    this.score += points;
+    this.scoreText.setText(this.score.toString());
+  }
+}
+
 class WaitingScene extends Phaser.Scene {
   constructor() {
     super({ key: 'WaitingScene' });
@@ -150,10 +401,9 @@ class WaitingScene extends Phaser.Scene {
     // Show connected confirmation
     this.connectedText.setVisible(true);
 
-    // After brief confirmation, transition to game (for now just log)
+    // After brief confirmation, transition to game scene
     this.time.delayedCall(1500, () => {
-      // TODO: Transition to game scene
-      console.log('Ready to start game!');
+      this.scene.start('GameScene', { ws: this.ws });
     });
   }
 
@@ -190,11 +440,15 @@ class BootScene extends Phaser.Scene {
 
 const config = {
   type: Phaser.AUTO,
-  width: 800,
-  height: 600,
+  scale: {
+    mode: Phaser.Scale.FIT,
+    autoCenter: Phaser.Scale.CENTER_BOTH,
+    width: window.innerWidth,
+    height: window.innerHeight,
+  },
   parent: 'game-container',
   backgroundColor: '#1a1a2e',
-  scene: [BootScene, WaitingScene],
+  scene: [BootScene, WaitingScene, GameScene],
   physics: {
     default: 'arcade',
     arcade: {
