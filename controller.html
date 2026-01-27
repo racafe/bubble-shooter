@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <title>Bubble Shooter Controller</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+      touch-action: none;
+      -webkit-touch-callout: none;
+      -webkit-user-select: none;
+      user-select: none;
+    }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+    }
+    body {
+      display: flex;
+      flex-direction: column;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    }
+
+    /* Connection status bar */
+    .status-bar {
+      padding: 12px 16px;
+      text-align: center;
+      font-size: 14px;
+      font-weight: 500;
+      transition: background-color 0.3s, color 0.3s;
+    }
+    .status-bar.connecting {
+      background-color: #f59e0b;
+      color: #000;
+    }
+    .status-bar.connected {
+      background-color: #22c55e;
+      color: #fff;
+    }
+    .status-bar.disconnected {
+      background-color: #ef4444;
+      color: #fff;
+    }
+    .status-bar.error {
+      background-color: #dc2626;
+      color: #fff;
+    }
+
+    /* Main controller area */
+    .controller-area {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-end;
+      align-items: center;
+      padding-bottom: 60px;
+      position: relative;
+    }
+
+    /* Aim line (from joystick to top) */
+    .aim-line {
+      position: absolute;
+      width: 4px;
+      background: linear-gradient(to top, rgba(74, 222, 128, 0.8), rgba(74, 222, 128, 0));
+      transform-origin: bottom center;
+      pointer-events: none;
+      display: none;
+      border-radius: 2px;
+    }
+
+    /* Joystick container */
+    .joystick-container {
+      position: relative;
+      width: 180px;
+      height: 180px;
+    }
+
+    /* Joystick base (outer ring) */
+    .joystick-base {
+      width: 180px;
+      height: 180px;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.1);
+      border: 3px solid rgba(255, 255, 255, 0.3);
+      position: relative;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+
+    /* Joystick knob (inner draggable circle) */
+    .joystick-knob {
+      width: 70px;
+      height: 70px;
+      border-radius: 50%;
+      background: linear-gradient(145deg, #4ade80, #22c55e);
+      box-shadow: 0 4px 15px rgba(74, 222, 128, 0.4);
+      position: absolute;
+      transition: transform 0.05s ease-out;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+    .joystick-knob::after {
+      content: '';
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.3);
+    }
+    .joystick-knob.active {
+      background: linear-gradient(145deg, #86efac, #4ade80);
+      box-shadow: 0 4px 20px rgba(74, 222, 128, 0.6);
+    }
+
+    /* Instructions text */
+    .instructions {
+      color: rgba(255, 255, 255, 0.5);
+      font-size: 14px;
+      text-align: center;
+      margin-bottom: 30px;
+    }
+
+    /* Angle display */
+    .angle-display {
+      position: absolute;
+      top: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      color: rgba(255, 255, 255, 0.7);
+      font-size: 48px;
+      font-weight: 300;
+      opacity: 0;
+      transition: opacity 0.2s;
+    }
+    .angle-display.visible {
+      opacity: 1;
+    }
+  </style>
+</head>
+<body>
+  <div class="status-bar connecting" id="statusBar">Connecting...</div>
+
+  <div class="controller-area" id="controllerArea">
+    <div class="angle-display" id="angleDisplay">90°</div>
+    <div class="aim-line" id="aimLine"></div>
+
+    <p class="instructions">Drag to aim, release to shoot</p>
+
+    <div class="joystick-container" id="joystickContainer">
+      <div class="joystick-base">
+        <div class="joystick-knob" id="joystickKnob"></div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    // Configuration
+    const WS_URL = `ws://${window.location.hostname}:3000`;
+
+    // Get room code from URL
+    const urlParams = new URLSearchParams(window.location.search);
+    const roomCode = urlParams.get('room');
+
+    // DOM elements
+    const statusBar = document.getElementById('statusBar');
+    const controllerArea = document.getElementById('controllerArea');
+    const joystickContainer = document.getElementById('joystickContainer');
+    const joystickKnob = document.getElementById('joystickKnob');
+    const aimLine = document.getElementById('aimLine');
+    const angleDisplay = document.getElementById('angleDisplay');
+
+    // State
+    let ws = null;
+    let isConnected = false;
+    let isDragging = false;
+    let joystickCenter = { x: 0, y: 0 };
+    let currentAngle = 90; // Degrees, 90 = straight up
+    const maxDistance = 55; // Max drag distance from center
+
+    // Initialize joystick center position
+    function updateJoystickCenter() {
+      const rect = joystickContainer.getBoundingClientRect();
+      joystickCenter = {
+        x: rect.left + rect.width / 2,
+        y: rect.top + rect.height / 2
+      };
+    }
+
+    // Update connection status UI
+    function setStatus(status, message) {
+      statusBar.className = 'status-bar ' + status;
+      statusBar.textContent = message;
+    }
+
+    // Connect to WebSocket server
+    function connect() {
+      if (!roomCode) {
+        setStatus('error', 'No room code provided');
+        return;
+      }
+
+      setStatus('connecting', 'Connecting...');
+
+      ws = new WebSocket(WS_URL);
+
+      ws.onopen = () => {
+        // Join the room
+        ws.send(JSON.stringify({
+          type: 'join_room',
+          data: { roomCode }
+        }));
+      };
+
+      ws.onmessage = (event) => {
+        const message = JSON.parse(event.data);
+        handleMessage(message);
+      };
+
+      ws.onerror = () => {
+        setStatus('error', 'Connection error');
+        isConnected = false;
+      };
+
+      ws.onclose = () => {
+        if (isConnected) {
+          setStatus('disconnected', 'Disconnected - tap to reconnect');
+          isConnected = false;
+        }
+      };
+    }
+
+    // Handle incoming WebSocket messages
+    function handleMessage(message) {
+      switch (message.type) {
+        case 'room_joined':
+          isConnected = true;
+          setStatus('connected', 'Connected');
+          break;
+        case 'error':
+          setStatus('error', message.data?.message || 'Error');
+          break;
+        case 'peer_disconnected':
+          setStatus('disconnected', 'Desktop disconnected');
+          break;
+        case 'peer_reconnected':
+          setStatus('connected', 'Connected');
+          break;
+      }
+    }
+
+    // Send shoot command to desktop
+    function sendShoot(angle) {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({
+          type: 'shoot',
+          data: { angle }
+        }));
+      }
+    }
+
+    // Calculate angle from joystick position
+    function calculateAngle(dx, dy) {
+      // Convert to angle (0 = right, 90 = up, 180 = left)
+      let angle = Math.atan2(-dy, dx) * (180 / Math.PI);
+      // Normalize to 0-180 range (we only shoot upward)
+      if (angle < 0) angle += 360;
+      // Clamp to valid shooting angles (10-170 degrees)
+      return Math.max(10, Math.min(170, angle));
+    }
+
+    // Update joystick knob position
+    function updateJoystickPosition(clientX, clientY) {
+      const dx = clientX - joystickCenter.x;
+      const dy = clientY - joystickCenter.y;
+      const distance = Math.sqrt(dx * dx + dy * dy);
+
+      // Clamp to max distance
+      let clampedX = dx;
+      let clampedY = dy;
+
+      if (distance > maxDistance) {
+        const scale = maxDistance / distance;
+        clampedX = dx * scale;
+        clampedY = dy * scale;
+      }
+
+      // Update knob position
+      joystickKnob.style.transform = `translate(${clampedX}px, ${clampedY}px)`;
+
+      // Calculate and display angle (only if there's significant movement)
+      if (distance > 10) {
+        currentAngle = calculateAngle(clampedX, clampedY);
+        angleDisplay.textContent = `${Math.round(currentAngle)}°`;
+
+        // Update aim line
+        updateAimLine(clampedX, clampedY, distance);
+      }
+    }
+
+    // Update the aim line visual
+    function updateAimLine(dx, dy, distance) {
+      if (distance < 10) {
+        aimLine.style.display = 'none';
+        return;
+      }
+
+      const containerRect = joystickContainer.getBoundingClientRect();
+      const areaRect = controllerArea.getBoundingClientRect();
+
+      // Position aim line starting from joystick center
+      const startX = containerRect.left + containerRect.width / 2 - areaRect.left;
+      const startY = containerRect.top + containerRect.height / 2 - areaRect.top;
+
+      // Calculate line length based on drag distance
+      const lineLength = Math.min(200, distance * 3);
+
+      // Calculate rotation angle (CSS rotation is clockwise from top)
+      const rotation = Math.atan2(dx, -dy) * (180 / Math.PI);
+
+      aimLine.style.display = 'block';
+      aimLine.style.left = `${startX - 2}px`;
+      aimLine.style.bottom = `${areaRect.height - startY}px`;
+      aimLine.style.height = `${lineLength}px`;
+      aimLine.style.transform = `rotate(${rotation}deg)`;
+    }
+
+    // Reset joystick to center
+    function resetJoystick() {
+      joystickKnob.style.transform = 'translate(0, 0)';
+      joystickKnob.classList.remove('active');
+      aimLine.style.display = 'none';
+      angleDisplay.classList.remove('visible');
+    }
+
+    // Touch/mouse event handlers
+    function handleStart(e) {
+      e.preventDefault();
+      isDragging = true;
+      joystickKnob.classList.add('active');
+      angleDisplay.classList.add('visible');
+      updateJoystickCenter();
+
+      const point = e.touches ? e.touches[0] : e;
+      updateJoystickPosition(point.clientX, point.clientY);
+    }
+
+    function handleMove(e) {
+      if (!isDragging) return;
+      e.preventDefault();
+
+      const point = e.touches ? e.touches[0] : e;
+      updateJoystickPosition(point.clientX, point.clientY);
+    }
+
+    function handleEnd(e) {
+      if (!isDragging) return;
+      e.preventDefault();
+
+      isDragging = false;
+
+      // Send shoot command if we had a valid drag
+      const rect = joystickContainer.getBoundingClientRect();
+      const centerX = rect.left + rect.width / 2;
+      const centerY = rect.top + rect.height / 2;
+
+      // Get last known position from the knob's transform
+      const transform = joystickKnob.style.transform;
+      const match = transform.match(/translate\(([-\d.]+)px,\s*([-\d.]+)px\)/);
+
+      if (match) {
+        const dx = parseFloat(match[1]);
+        const dy = parseFloat(match[2]);
+        const distance = Math.sqrt(dx * dx + dy * dy);
+
+        // Only shoot if drag was significant
+        if (distance > 15) {
+          sendShoot(currentAngle);
+        }
+      }
+
+      resetJoystick();
+    }
+
+    // Prevent default touch behaviors on the whole document
+    document.addEventListener('touchmove', (e) => {
+      if (isDragging) {
+        e.preventDefault();
+      }
+    }, { passive: false });
+
+    // Prevent context menu on long press
+    document.addEventListener('contextmenu', (e) => e.preventDefault());
+
+    // Attach event listeners to joystick
+    joystickContainer.addEventListener('touchstart', handleStart, { passive: false });
+    joystickContainer.addEventListener('mousedown', handleStart);
+
+    document.addEventListener('touchmove', handleMove, { passive: false });
+    document.addEventListener('mousemove', handleMove);
+
+    document.addEventListener('touchend', handleEnd);
+    document.addEventListener('mouseup', handleEnd);
+    document.addEventListener('touchcancel', handleEnd);
+
+    // Handle window resize
+    window.addEventListener('resize', updateJoystickCenter);
+    window.addEventListener('orientationchange', () => {
+      setTimeout(updateJoystickCenter, 100);
+    });
+
+    // Tap status bar to reconnect when disconnected
+    statusBar.addEventListener('click', () => {
+      if (!isConnected && ws?.readyState !== WebSocket.CONNECTING) {
+        connect();
+      }
+    });
+
+    // Initialize
+    updateJoystickCenter();
+    connect();
+  </script>
+</body>
+</html>
