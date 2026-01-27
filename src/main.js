@@ -560,6 +560,11 @@ const BUBBLE_SPEED = 800;
 const BUBBLE_RADIUS = 20;
 const FALL_GRAVITY = 800; // Gravity for falling bubbles
 
+// Visual polish constants
+const SCREEN_SHAKE_THRESHOLD = 5; // Combo size to trigger screen shake
+const SCREEN_SHAKE_INTENSITY = 8;
+const SCREEN_SHAKE_DURATION = 200;
+
 // Scoring constants
 const POINTS_PER_POP = 10;
 const POINTS_PER_FALL = 20;
@@ -626,6 +631,38 @@ class GameScene extends Phaser.Scene {
     this.initialsInput = null;
     this.selectedLetterIndex = 0;
     this.initialsLetters = ['A', 'A', 'A'];
+    // Background animation elements
+    this.bgElements = [];
+  }
+
+  // Create a glossy cartoon-style bubble with multiple highlights
+  createGlossyBubble(x, y, radius, color, strokeWidth = 2, strokeAlpha = 0.6) {
+    const container = this.add.container(x, y);
+
+    // Main bubble body with gradient-like effect (darker edge)
+    const body = this.add.circle(0, 0, radius, color);
+    body.setStrokeStyle(strokeWidth, 0xffffff, strokeAlpha);
+
+    // Inner glow - slightly lighter center
+    const innerGlow = this.add.circle(0, -radius * 0.1, radius * 0.7, color, 0.3);
+
+    // Main highlight (top-left shine)
+    const mainShine = this.add.circle(-radius * 0.3, -radius * 0.3, radius * 0.25, 0xffffff, 0.7);
+
+    // Secondary smaller highlight
+    const secondShine = this.add.circle(-radius * 0.15, -radius * 0.5, radius * 0.12, 0xffffff, 0.5);
+
+    // Bottom reflection (subtle)
+    const bottomReflect = this.add.ellipse(0, radius * 0.4, radius * 0.6, radius * 0.2, 0xffffff, 0.15);
+
+    container.add([body, innerGlow, mainShine, secondShine, bottomReflect]);
+
+    // Store reference to main body for color changes
+    container.body = body;
+    container.mainShine = mainShine;
+    container.secondShine = secondShine;
+
+    return container;
   }
 
   init(data) {
@@ -1004,13 +1041,8 @@ class GameScene extends Phaser.Scene {
       return;
     }
 
-    // Rotate bubble while moving
+    // Rotate bubble container while moving (shine moves with it)
     bubble.rotation += bubble.rotationSpeed * delta;
-
-    // Update shine position
-    if (bubble.updateShine) {
-      bubble.updateShine();
-    }
   }
 
   checkGridCollision(x, y) {
@@ -1042,8 +1074,7 @@ class GameScene extends Phaser.Scene {
       this.snapBubbleToGrid(bubble, targetCell);
     } else {
       // No valid position found - shouldn't happen normally
-      // Destroy the bubble
-      if (bubble.shine) bubble.shine.destroy();
+      // Destroy the bubble (container)
       bubble.destroy();
     }
 
@@ -1053,20 +1084,13 @@ class GameScene extends Phaser.Scene {
   snapBubbleToGrid(bubble, targetCell) {
     const targetPos = targetCell.pos;
 
-    // Create snap animation using tween
+    // Create snap animation using tween (bubble is a container)
     this.tweens.add({
       targets: bubble,
       x: targetPos.x,
       y: targetPos.y,
       duration: 50, // Quick snap
       ease: 'Power2',
-      onUpdate: () => {
-        // Update shine position during tween
-        if (bubble.shine) {
-          bubble.shine.x = bubble.x - 6;
-          bubble.shine.y = bubble.y - 6;
-        }
-      },
       onComplete: () => {
         // Play stick sound
         soundManager.playStick();
@@ -1074,12 +1098,14 @@ class GameScene extends Phaser.Scene {
         // Create the visual snap effect
         this.createSnapEffect(targetPos.x, targetPos.y);
 
-        // Destroy the shooting bubble visuals
-        if (bubble.shine) bubble.shine.destroy();
+        // Store color before destroying
+        const bubbleColor = bubble.color;
+
+        // Destroy the shooting bubble container
         bubble.destroy();
 
         // Add bubble to grid data structure
-        const newBubble = this.addBubbleToGrid(targetCell.row, targetCell.col, bubble.color);
+        const newBubble = this.addBubbleToGrid(targetCell.row, targetCell.col, bubbleColor);
 
         // Check for matches after bubble is placed
         if (newBubble) {
@@ -1163,6 +1189,87 @@ class GameScene extends Phaser.Scene {
 
     // Add the background image
     this.add.image(width / 2, height / 2, 'gradient-bg');
+
+    // Add animated background elements (floating bubbles, sparkles)
+    this.createAnimatedBackgroundElements(width, height);
+  }
+
+  createAnimatedBackgroundElements(width, height) {
+    // Create floating decorative bubbles in the background
+    const numBubbles = 12;
+    const colors = [0xffffff, 0xe0e7ff, 0xfce7f3, 0xddd6fe];
+
+    for (let i = 0; i < numBubbles; i++) {
+      const x = Math.random() * width;
+      const y = Math.random() * height;
+      const radius = 5 + Math.random() * 15;
+      const alpha = 0.1 + Math.random() * 0.15;
+      const color = Phaser.Utils.Array.GetRandom(colors);
+
+      const bubble = this.add.circle(x, y, radius, color, alpha);
+      bubble.setDepth(-1); // Behind game elements
+
+      // Store for cleanup
+      this.bgElements.push(bubble);
+
+      // Gentle floating animation
+      const floatDistance = 20 + Math.random() * 30;
+      const floatDuration = 3000 + Math.random() * 4000;
+
+      this.tweens.add({
+        targets: bubble,
+        y: bubble.y - floatDistance,
+        alpha: alpha * 0.5,
+        duration: floatDuration,
+        yoyo: true,
+        repeat: -1,
+        ease: 'Sine.easeInOut',
+        delay: Math.random() * 2000
+      });
+
+      // Gentle horizontal sway
+      this.tweens.add({
+        targets: bubble,
+        x: bubble.x + (Math.random() - 0.5) * 40,
+        duration: floatDuration * 1.3,
+        yoyo: true,
+        repeat: -1,
+        ease: 'Sine.easeInOut',
+        delay: Math.random() * 1000
+      });
+    }
+
+    // Add subtle sparkles
+    const numSparkles = 8;
+    for (let i = 0; i < numSparkles; i++) {
+      const x = 50 + Math.random() * (width - 100);
+      const y = 80 + Math.random() * (height - 200);
+
+      const sparkle = this.add.star(x, y, 4, 2, 5, 0xffffff, 0.3);
+      sparkle.setDepth(-1);
+      this.bgElements.push(sparkle);
+
+      // Twinkling animation
+      this.tweens.add({
+        targets: sparkle,
+        alpha: 0.05,
+        scale: 0.5,
+        duration: 1500 + Math.random() * 1000,
+        yoyo: true,
+        repeat: -1,
+        ease: 'Sine.easeInOut',
+        delay: Math.random() * 2000
+      });
+
+      // Slow rotation
+      this.tweens.add({
+        targets: sparkle,
+        rotation: Math.PI * 2,
+        duration: 8000 + Math.random() * 4000,
+        repeat: -1,
+        ease: 'Linear'
+      });
+    }
   }
 
   createWalls(width, height) {
@@ -1233,24 +1340,26 @@ class GameScene extends Phaser.Scene {
   }
 
   createScoreDisplay() {
-    // Score background panel
-    this.add.rectangle(80, 30, 140, 40, 0x000000, 0.4)
-      .setStrokeStyle(2, 0xffffff, 0.3);
+    // Score background panel with rounded look
+    const panel = this.add.rectangle(80, 30, 140, 45, 0x000000, 0.5);
+    panel.setStrokeStyle(3, 0xffffff, 0.4);
 
-    // Score label
-    this.add.text(20, 20, 'SCORE', {
+    // Score label with playful font
+    this.add.text(20, 18, 'SCORE', {
       fontSize: '14px',
-      fontFamily: 'Arial, sans-serif',
+      fontFamily: '"Comic Sans MS", "Chalkboard", cursive, sans-serif',
       color: '#ffffff',
       fontStyle: 'bold'
     });
 
-    // Score value
+    // Score value with playful bouncy font
     this.scoreText = this.add.text(20, 35, '0', {
-      fontSize: '20px',
-      fontFamily: 'Arial, sans-serif',
+      fontSize: '22px',
+      fontFamily: '"Comic Sans MS", "Chalkboard", cursive, sans-serif',
       color: '#ffe66d',
-      fontStyle: 'bold'
+      fontStyle: 'bold',
+      stroke: '#000000',
+      strokeThickness: 2
     });
   }
 
@@ -1258,69 +1367,66 @@ class GameScene extends Phaser.Scene {
     const shooterY = height - 50;
     const shooterX = width / 2;
 
-    // Shooter base (semi-circle platform)
-    this.add.arc(shooterX, shooterY + 20, 50, 180, 0, false, 0x2d3436, 0.9)
-      .setStrokeStyle(3, 0xffffff, 0.4);
+    // Shooter base (semi-circle platform) with gradient-like effect
+    const base = this.add.arc(shooterX, shooterY + 20, 50, 180, 0, false, 0x2d3436, 0.9);
+    base.setStrokeStyle(3, 0xffffff, 0.4);
 
-    // Shooter cannon/tube
+    // Decorative rings on base
+    this.add.arc(shooterX, shooterY + 20, 40, 180, 0, false, 0x3d4446, 0.5);
+    this.add.arc(shooterX, shooterY + 20, 30, 180, 0, false, 0x4d5456, 0.3);
+
+    // Shooter cannon/tube with metallic look
     this.shooterCannon = this.add.rectangle(
       shooterX,
       shooterY - 10,
-      16,
-      40,
+      18,
+      42,
       0x636e72,
       1
     ).setStrokeStyle(2, 0xffffff, 0.5);
 
-    // Current bubble to shoot (positioned at cannon tip)
-    this.currentBubble = this.add.circle(
+    // Cannon highlight
+    this.add.rectangle(shooterX - 4, shooterY - 10, 3, 38, 0xffffff, 0.2);
+
+    // Current bubble to shoot (glossy style)
+    this.currentBubbleContainer = this.createGlossyBubble(
       shooterX,
       shooterY - 35,
-      20,
-      this.currentBubbleColor
-    ).setStrokeStyle(3, 0xffffff, 0.8);
-
-    // Add shine effect to current bubble
-    this.add.circle(
-      shooterX - 6,
-      shooterY - 41,
-      5,
-      0xffffff,
-      0.6
+      BUBBLE_RADIUS,
+      this.currentBubbleColor,
+      3, 0.8
     );
+
+    // Store reference to body for color changes
+    this.currentBubble = this.currentBubbleContainer.body;
 
     // Next bubble preview (smaller, to the right)
     const previewX = shooterX + 80;
     const previewY = shooterY;
 
-    // Preview label
-    this.add.text(previewX - 25, previewY - 35, 'NEXT', {
+    // Preview label with playful font
+    this.add.text(previewX - 25, previewY - 38, 'NEXT', {
       fontSize: '12px',
-      fontFamily: 'Arial, sans-serif',
+      fontFamily: '"Comic Sans MS", "Chalkboard", cursive, sans-serif',
       color: '#ffffff',
       fontStyle: 'bold'
     });
 
     // Preview bubble background
-    this.add.circle(previewX, previewY, 18, 0x000000, 0.3)
+    this.add.circle(previewX, previewY, 20, 0x000000, 0.4)
       .setStrokeStyle(2, 0xffffff, 0.3);
 
-    // Next bubble preview
-    this.nextBubble = this.add.circle(
+    // Next bubble preview (glossy mini version)
+    this.nextBubbleContainer = this.createGlossyBubble(
       previewX,
       previewY,
       15,
-      this.nextBubbleColor
-    ).setStrokeStyle(2, 0xffffff, 0.6);
-
-    // Add shine to preview bubble
-    this.add.circle(
-      previewX - 4,
-      previewY - 4,
-      3,
-      0xffffff,
-      0.5
+      this.nextBubbleColor,
+      2, 0.6
     );
+
+    // Store reference to body for color changes
+    this.nextBubble = this.nextBubbleContainer.body;
   }
 
   initializeGrid(_width) {
@@ -1392,12 +1498,8 @@ class GameScene extends Phaser.Scene {
 
     const pos = this.getGridPosition(row, col);
 
-    // Create bubble sprite
-    const sprite = this.add.circle(pos.x, pos.y, BUBBLE_RADIUS, color)
-      .setStrokeStyle(2, 0xffffff, 0.6);
-
-    // Add shine effect
-    const shine = this.add.circle(pos.x - 6, pos.y - 6, 4, 0xffffff, 0.5);
+    // Create glossy bubble container
+    const sprite = this.createGlossyBubble(pos.x, pos.y, BUBBLE_RADIUS, color);
 
     const bubbleData = {
       row,
@@ -1406,7 +1508,7 @@ class GameScene extends Phaser.Scene {
       y: pos.y,
       color,
       sprite,
-      shine
+      shine: null // Shine is now part of container
     };
 
     this.gridBubbles.push(bubbleData);
@@ -1504,6 +1606,10 @@ class GameScene extends Phaser.Scene {
     const connected = this.findConnectedBubbles(newBubble);
 
     if (connected.length >= 3) {
+      // Calculate center position for score popup
+      const centerX = connected.reduce((sum, b) => sum + b.x, 0) / connected.length;
+      const centerY = connected.reduce((sum, b) => sum + b.y, 0) / connected.length;
+
       // Pop all connected bubbles
       const popScore = connected.length * POINTS_PER_POP;
       this.popBubbles(connected, connected.length);
@@ -1513,12 +1619,15 @@ class GameScene extends Phaser.Scene {
         const floating = this.findFloatingBubbles();
         if (floating.length > 0) {
           const fallScore = floating.length * POINTS_PER_FALL;
+          // Calculate center for floating score popup
+          const floatCenterX = floating.reduce((sum, b) => sum + b.x, 0) / floating.length;
+          const floatCenterY = floating.reduce((sum, b) => sum + b.y, 0) / floating.length;
           this.dropFloatingBubbles(floating);
-          this.updateScore(fallScore);
+          this.updateScore(fallScore, floatCenterX, floatCenterY);
         }
       });
 
-      this.updateScore(popScore);
+      this.updateScore(popScore, centerX, centerY);
     }
   }
 
@@ -1526,6 +1635,11 @@ class GameScene extends Phaser.Scene {
   popBubbles(bubbles, comboSize = 3) {
     // Play pop sound with pitch based on combo size (once for the whole group)
     soundManager.playPop(comboSize);
+
+    // Screen shake for large combos
+    if (comboSize >= SCREEN_SHAKE_THRESHOLD) {
+      this.triggerScreenShake(comboSize);
+    }
 
     for (let i = 0; i < bubbles.length; i++) {
       const bubble = bubbles[i];
@@ -1538,34 +1652,62 @@ class GameScene extends Phaser.Scene {
     }
   }
 
-  // Create popping effect with particles
+  // Trigger screen shake effect
+  triggerScreenShake(comboSize) {
+    // Intensity scales with combo size
+    const intensity = SCREEN_SHAKE_INTENSITY + (comboSize - SCREEN_SHAKE_THRESHOLD) * 2;
+    const duration = SCREEN_SHAKE_DURATION + (comboSize - SCREEN_SHAKE_THRESHOLD) * 30;
+
+    this.cameras.main.shake(duration, intensity / 1000);
+  }
+
+  // Create popping effect with enhanced colorful particles
   createPopEffect(x, y, color) {
-    // Central burst
-    const burst = this.add.circle(x, y, BUBBLE_RADIUS, color, 0.8);
+    // Central burst with glow
+    const burstGlow = this.add.circle(x, y, BUBBLE_RADIUS * 1.2, 0xffffff, 0.4);
+    this.tweens.add({
+      targets: burstGlow,
+      scale: 2,
+      alpha: 0,
+      duration: 250,
+      ease: 'Quad.easeOut',
+      onComplete: () => burstGlow.destroy()
+    });
+
+    const burst = this.add.circle(x, y, BUBBLE_RADIUS, color, 0.9);
     this.tweens.add({
       targets: burst,
-      scale: 1.5,
+      scale: 1.8,
       alpha: 0,
       duration: 200,
       ease: 'Quad.easeOut',
       onComplete: () => burst.destroy()
     });
 
-    // Particle explosion - 8 particles in a ring
-    const particleCount = 8;
+    // Inner flash
+    const flash = this.add.circle(x, y, BUBBLE_RADIUS * 0.6, 0xffffff, 0.8);
+    this.tweens.add({
+      targets: flash,
+      scale: 0.1,
+      alpha: 0,
+      duration: 150,
+      ease: 'Quad.easeIn',
+      onComplete: () => flash.destroy()
+    });
+
+    // Colorful particle explosion - 12 particles in a ring with varied colors
+    const particleCount = 12;
+    const complementColor = this.getComplementaryColor(color);
+
     for (let i = 0; i < particleCount; i++) {
-      const angle = (i / particleCount) * Math.PI * 2;
-      const particleRadius = 5 + Math.random() * 3;
+      const angle = (i / particleCount) * Math.PI * 2 + Math.random() * 0.3;
+      const particleRadius = 4 + Math.random() * 4;
+      // Alternate between main color and white/complement for colorful effect
+      const particleColor = i % 3 === 0 ? 0xffffff : (i % 3 === 1 ? color : complementColor);
 
-      const particle = this.add.circle(
-        x,
-        y,
-        particleRadius,
-        color,
-        0.9
-      );
+      const particle = this.add.circle(x, y, particleRadius, particleColor, 0.95);
 
-      const distance = BUBBLE_RADIUS * 2 + Math.random() * BUBBLE_RADIUS;
+      const distance = BUBBLE_RADIUS * 2.5 + Math.random() * BUBBLE_RADIUS;
       const targetX = x + Math.cos(angle) * distance;
       const targetY = y + Math.sin(angle) * distance;
 
@@ -1573,43 +1715,80 @@ class GameScene extends Phaser.Scene {
         targets: particle,
         x: targetX,
         y: targetY,
-        scale: 0.2,
+        scale: 0.1,
         alpha: 0,
-        duration: 250 + Math.random() * 100,
+        duration: 300 + Math.random() * 150,
         ease: 'Quad.easeOut',
         onComplete: () => particle.destroy()
       });
     }
 
-    // Add white sparkle effect
-    for (let i = 0; i < 4; i++) {
-      const sparkle = this.add.circle(
+    // Star sparkles flying upward
+    for (let i = 0; i < 5; i++) {
+      const sparkle = this.add.star(
         x + (Math.random() - 0.5) * BUBBLE_RADIUS,
         y + (Math.random() - 0.5) * BUBBLE_RADIUS,
-        3,
+        4, 2, 5,
         0xffffff,
         1
       );
 
       this.tweens.add({
         targets: sparkle,
-        y: sparkle.y - 20 - Math.random() * 30,
+        y: sparkle.y - 40 - Math.random() * 40,
+        x: sparkle.x + (Math.random() - 0.5) * 30,
         alpha: 0,
-        scale: 0.3,
-        duration: 300 + Math.random() * 100,
+        scale: 0.2,
+        rotation: Math.PI,
+        duration: 400 + Math.random() * 150,
         ease: 'Quad.easeOut',
         onComplete: () => sparkle.destroy()
       });
     }
+
+    // Confetti-like small particles
+    for (let i = 0; i < 6; i++) {
+      const confettiColors = [color, 0xffffff, 0xffeb3b, 0xff69b4, complementColor];
+      const confetti = this.add.rectangle(
+        x, y,
+        3 + Math.random() * 4,
+        6 + Math.random() * 6,
+        Phaser.Utils.Array.GetRandom(confettiColors),
+        0.9
+      );
+
+      const angle = Math.random() * Math.PI * 2;
+      const distance = BUBBLE_RADIUS * 1.5 + Math.random() * BUBBLE_RADIUS * 2;
+
+      this.tweens.add({
+        targets: confetti,
+        x: x + Math.cos(angle) * distance,
+        y: y + Math.sin(angle) * distance + 20, // Slight downward drift
+        rotation: Math.random() * Math.PI * 4,
+        alpha: 0,
+        scale: 0.3,
+        duration: 450 + Math.random() * 200,
+        ease: 'Quad.easeOut',
+        onComplete: () => confetti.destroy()
+      });
+    }
+  }
+
+  // Get a complementary color for visual variety
+  getComplementaryColor(color) {
+    const r = (color >> 16) & 0xff;
+    const g = (color >> 8) & 0xff;
+    const b = color & 0xff;
+    // Simple complementary: shift hue
+    return ((255 - r) << 16) | ((255 - g) << 8) | (255 - b);
   }
 
   // Remove bubble from grid data structure
   removeBubbleFromGrid(bubble) {
     const index = this.gridBubbles.indexOf(bubble);
     if (index > -1) {
-      // Destroy sprites
+      // Destroy container (includes all children)
       if (bubble.sprite) bubble.sprite.destroy();
-      if (bubble.shine) bubble.shine.destroy();
       this.gridBubbles.splice(index, 1);
     }
   }
@@ -1659,10 +1838,9 @@ class GameScene extends Phaser.Scene {
         this.gridBubbles.splice(index, 1);
       }
 
-      // Add to falling bubbles with initial velocity
+      // Add to falling bubbles with initial velocity (sprite is container)
       this.fallingBubbles.push({
         sprite: bubble.sprite,
-        shine: bubble.shine,
         x: bubble.x,
         y: bubble.y,
         velocityY: 0,
@@ -1687,21 +1865,16 @@ class GameScene extends Phaser.Scene {
       bubble.x += bubble.velocityX * delta;
       bubble.y += bubble.velocityY * delta;
 
-      // Update sprite position
+      // Update sprite container position and rotation
       if (bubble.sprite) {
         bubble.sprite.x = bubble.x;
         bubble.sprite.y = bubble.y;
         bubble.sprite.rotation += bubble.rotationSpeed * delta;
       }
-      if (bubble.shine) {
-        bubble.shine.x = bubble.x - 6;
-        bubble.shine.y = bubble.y - 6;
-      }
 
       // Remove if off screen
       if (bubble.y > this.cameras.main.height + 50) {
         if (bubble.sprite) bubble.sprite.destroy();
-        if (bubble.shine) bubble.shine.destroy();
         toRemove.push(bubble);
       }
     }
@@ -1740,25 +1913,18 @@ class GameScene extends Phaser.Scene {
     const shooterX = width / 2;
     const shooterY = height - 50 - 35; // Same as currentBubble position
 
-    // Create shooting bubble
-    this.shootingBubble = this.add.circle(
+    // Create glossy shooting bubble
+    const shootingContainer = this.createGlossyBubble(
       shooterX,
       shooterY,
       BUBBLE_RADIUS,
-      this.currentBubbleColor
-    ).setStrokeStyle(3, 0xffffff, 0.8);
-
-    // Add shine effect
-    const shine = this.add.circle(
-      shooterX - 6,
-      shooterY - 6,
-      5,
-      0xffffff,
-      0.6
+      this.currentBubbleColor,
+      3, 0.8
     );
-    this.shootingBubble.shine = shine;
 
-    // Set physics properties
+    this.shootingBubble = shootingContainer;
+
+    // Set physics properties on container
     this.shootingBubble.velocityX = velocityX;
     this.shootingBubble.velocityY = velocityY;
     this.shootingBubble.active = true;
@@ -1766,14 +1932,6 @@ class GameScene extends Phaser.Scene {
 
     // Add rotation based on horizontal direction
     this.shootingBubble.rotationSpeed = velocityX > 0 ? 5 : -5;
-
-    // Move shine with bubble in update
-    this.shootingBubble.updateShine = () => {
-      if (this.shootingBubble && shine) {
-        shine.x = this.shootingBubble.x - 6;
-        shine.y = this.shootingBubble.y - 6;
-      }
-    };
 
     // Cycle colors for next shot (using available colors based on score)
     this.currentBubbleColor = this.nextBubbleColor;
@@ -1888,9 +2046,23 @@ class GameScene extends Phaser.Scene {
     this.trajectoryGraphics.strokeCircle(lastPoint.x, lastPoint.y, BUBBLE_RADIUS);
   }
 
-  updateScore(points) {
+  updateScore(points, x = null, y = null) {
     this.score += points;
     this.scoreText.setText(this.score.toString());
+
+    // Animate score text
+    this.tweens.add({
+      targets: this.scoreText,
+      scale: 1.3,
+      duration: 100,
+      yoyo: true,
+      ease: 'Quad.easeOut'
+    });
+
+    // Show floating score popup if position provided
+    if (x !== null && y !== null) {
+      this.createScorePopup(points, x, y);
+    }
 
     // Check if we've unlocked new colors
     this.checkColorProgression();
@@ -1900,6 +2072,52 @@ class GameScene extends Phaser.Scene {
 
     // Update music tempo based on score
     musicManager.updateTempo(this.score);
+  }
+
+  // Create animated score popup that floats up and fades
+  createScorePopup(points, x, y) {
+    // Determine color based on points (higher = more exciting color)
+    let color = '#ffffff';
+    let fontSize = '20px';
+
+    if (points >= 100) {
+      color = '#ffd700'; // Gold for big scores
+      fontSize = '28px';
+    } else if (points >= 50) {
+      color = '#4ade80'; // Green for good scores
+      fontSize = '24px';
+    } else if (points >= 30) {
+      color = '#60a5fa'; // Blue for medium scores
+      fontSize = '22px';
+    }
+
+    const popup = this.add.text(x, y, `+${points}`, {
+      fontSize: fontSize,
+      fontFamily: '"Comic Sans MS", "Chalkboard", cursive, sans-serif',
+      color: color,
+      fontStyle: 'bold',
+      stroke: '#000000',
+      strokeThickness: 3
+    }).setOrigin(0.5).setDepth(80);
+
+    // Float up and fade animation
+    this.tweens.add({
+      targets: popup,
+      y: y - 60,
+      alpha: 0,
+      scale: 1.5,
+      duration: 800,
+      ease: 'Quad.easeOut',
+      onComplete: () => popup.destroy()
+    });
+
+    // Slight wobble for playful feel
+    this.tweens.add({
+      targets: popup,
+      x: x + (Math.random() - 0.5) * 20,
+      duration: 400,
+      ease: 'Sine.easeInOut'
+    });
   }
 
   // Calculate descent interval based on current score
@@ -1975,20 +2193,24 @@ class GameScene extends Phaser.Scene {
     const warningPanel = this.add.rectangle(0, 0, 200, 60, 0xff0000, 0.8);
     warningPanel.setStrokeStyle(3, 0xffffff, 1);
 
-    // Warning text
+    // Warning text with playful font
     this.warningText = this.add.text(0, -10, 'DESCENDING!', {
       fontSize: '18px',
-      fontFamily: 'Arial, sans-serif',
+      fontFamily: '"Comic Sans MS", "Chalkboard", cursive, sans-serif',
       color: '#ffffff',
-      fontStyle: 'bold'
+      fontStyle: 'bold',
+      stroke: '#000000',
+      strokeThickness: 2
     }).setOrigin(0.5);
 
-    // Countdown number
+    // Countdown number with playful font
     this.warningCountdownText = this.add.text(0, 15, '3', {
-      fontSize: '24px',
-      fontFamily: 'Arial, sans-serif',
+      fontSize: '26px',
+      fontFamily: '"Comic Sans MS", "Chalkboard", cursive, sans-serif',
       color: '#ffffff',
-      fontStyle: 'bold'
+      fontStyle: 'bold',
+      stroke: '#000000',
+      strokeThickness: 3
     }).setOrigin(0.5);
 
     this.warningIndicator.add([warningPanel, this.warningText, this.warningCountdownText]);
@@ -2061,19 +2283,13 @@ class GameScene extends Phaser.Scene {
       bubble.y = newPos.y;
       bubble.x = newPos.x; // X might change due to odd/even row offset
 
-      // Animate the descent
+      // Animate the descent (sprite is a container now)
       this.tweens.add({
-        targets: [bubble.sprite, bubble.shine],
+        targets: bubble.sprite,
+        x: newPos.x,
         y: newPos.y,
-        x: (target) => target === bubble.shine ? newPos.x - 6 : newPos.x,
         duration: 200,
-        ease: 'Quad.easeOut',
-        onUpdate: () => {
-          if (bubble.shine) {
-            bubble.shine.y = bubble.sprite.y - 6;
-            bubble.shine.x = bubble.sprite.x - 6;
-          }
-        }
+        ease: 'Quad.easeOut'
       });
     }
 
@@ -2101,11 +2317,8 @@ class GameScene extends Phaser.Scene {
       const color = this.getRandomAvailableColor();
       const pos = this.getGridPosition(0, col);
 
-      // Create bubble sprite (start above screen and animate in)
-      const sprite = this.add.circle(pos.x, pos.y - ROW_HEIGHT, BUBBLE_RADIUS, color)
-        .setStrokeStyle(2, 0xffffff, 0.6);
-
-      const shine = this.add.circle(pos.x - 6, pos.y - ROW_HEIGHT - 6, 4, 0xffffff, 0.5);
+      // Create glossy bubble container (start above screen)
+      const sprite = this.createGlossyBubble(pos.x, pos.y - ROW_HEIGHT, BUBBLE_RADIUS, color);
 
       const bubbleData = {
         row: 0,
@@ -2114,7 +2327,7 @@ class GameScene extends Phaser.Scene {
         y: pos.y,
         color,
         sprite,
-        shine
+        shine: null
       };
 
       this.gridBubbles.push(bubbleData);
@@ -2123,12 +2336,6 @@ class GameScene extends Phaser.Scene {
       this.tweens.add({
         targets: sprite,
         y: pos.y,
-        duration: 200,
-        ease: 'Quad.easeOut'
-      });
-      this.tweens.add({
-        targets: shine,
-        y: pos.y - 6,
         duration: 200,
         ease: 'Quad.easeOut'
       });
@@ -2240,42 +2447,71 @@ class GameScene extends Phaser.Scene {
     const topOffset = -height / 2 + 60;
     let yPos = topOffset;
 
-    // Game Over text
+    // Game Over text with playful font
     const gameOverText = this.add.text(0, yPos, 'GAME OVER', {
-      fontSize: '42px',
-      fontFamily: 'Arial, sans-serif',
+      fontSize: '46px',
+      fontFamily: '"Comic Sans MS", "Chalkboard", cursive, sans-serif',
       color: '#ef4444',
-      fontStyle: 'bold'
+      fontStyle: 'bold',
+      stroke: '#000000',
+      strokeThickness: 4
     }).setOrigin(0.5);
     this.gameOverOverlay.add(gameOverText);
+
+    // Animate game over text entrance
+    gameOverText.setScale(0);
+    this.tweens.add({
+      targets: gameOverText,
+      scale: 1,
+      duration: 400,
+      ease: 'Back.easeOut',
+      delay: 100
+    });
     yPos += 60;
 
     // Final score label
     const scoreLabel = this.add.text(0, yPos, 'Final Score', {
       fontSize: '20px',
-      fontFamily: 'Arial, sans-serif',
-      color: '#888888'
+      fontFamily: '"Comic Sans MS", "Chalkboard", cursive, sans-serif',
+      color: '#aaaaaa'
     }).setOrigin(0.5);
     this.gameOverOverlay.add(scoreLabel);
     yPos += 30;
 
-    // Final score value
+    // Final score value with playful styling
     this.finalScoreText = this.add.text(0, yPos, this.score.toString(), {
-      fontSize: '48px',
-      fontFamily: 'Arial, sans-serif',
+      fontSize: '52px',
+      fontFamily: '"Comic Sans MS", "Chalkboard", cursive, sans-serif',
       color: '#ffe66d',
-      fontStyle: 'bold'
+      fontStyle: 'bold',
+      stroke: '#000000',
+      strokeThickness: 3
     }).setOrigin(0.5);
     this.gameOverOverlay.add(this.finalScoreText);
+
+    // Animate score counting up
+    this.finalScoreText.setText('0');
+    this.tweens.addCounter({
+      from: 0,
+      to: this.score,
+      duration: 1000,
+      ease: 'Quad.easeOut',
+      delay: 300,
+      onUpdate: (tween) => {
+        this.finalScoreText.setText(Math.floor(tween.getValue()).toString());
+      }
+    });
     yPos += 50;
 
     // NEW HIGH SCORE message if applicable
     if (this.isHighScore) {
       const highScoreText = this.add.text(0, yPos, '🎉 NEW HIGH SCORE! 🎉', {
-        fontSize: '24px',
-        fontFamily: 'Arial, sans-serif',
+        fontSize: '26px',
+        fontFamily: '"Comic Sans MS", "Chalkboard", cursive, sans-serif',
         color: '#4ade80',
-        fontStyle: 'bold'
+        fontStyle: 'bold',
+        stroke: '#000000',
+        strokeThickness: 2
       }).setOrigin(0.5);
       this.gameOverOverlay.add(highScoreText);
 
@@ -2318,7 +2554,7 @@ class GameScene extends Phaser.Scene {
     // Instruction text
     const instructText = this.add.text(0, -25, 'Enter your initials:', {
       fontSize: '16px',
-      fontFamily: 'Arial, sans-serif',
+      fontFamily: '"Comic Sans MS", "Chalkboard", cursive, sans-serif',
       color: '#aaaaaa'
     }).setOrigin(0.5);
     this.initialsInput.add(instructText);
@@ -2481,12 +2717,14 @@ class GameScene extends Phaser.Scene {
     this.leaderboardContainer = this.add.container(0, yPos);
     this.gameOverOverlay.add(this.leaderboardContainer);
 
-    // Leaderboard title
+    // Leaderboard title with playful font
     const title = this.add.text(0, 0, '🏆 TOP SCORES 🏆', {
-      fontSize: '20px',
-      fontFamily: 'Arial, sans-serif',
+      fontSize: '22px',
+      fontFamily: '"Comic Sans MS", "Chalkboard", cursive, sans-serif',
       color: '#fbbf24',
-      fontStyle: 'bold'
+      fontStyle: 'bold',
+      stroke: '#000000',
+      strokeThickness: 2
     }).setOrigin(0.5);
     this.leaderboardContainer.add(title);
 
@@ -2506,7 +2744,7 @@ class GameScene extends Phaser.Scene {
     if (leaderboard.length === 0) {
       const emptyText = this.add.text(0, startY + 20, 'No scores yet!', {
         fontSize: '16px',
-        fontFamily: 'Arial, sans-serif',
+        fontFamily: '"Comic Sans MS", "Chalkboard", cursive, sans-serif',
         color: '#666666'
       }).setOrigin(0.5);
       this.leaderboardContainer.add(emptyText);
@@ -2561,30 +2799,66 @@ class GameScene extends Phaser.Scene {
     const btnContainer = this.add.container(0, yPos);
     this.gameOverOverlay.add(btnContainer);
 
-    // Button background
-    const btnBg = this.add.rectangle(0, 0, 180, 50, 0x3b82f6, 1);
-    btnBg.setStrokeStyle(3, 0x60a5fa);
+    // Button background with rounded look
+    const btnBg = this.add.rectangle(0, 0, 200, 55, 0x3b82f6, 1);
+    btnBg.setStrokeStyle(4, 0x60a5fa);
     btnBg.setInteractive({ useHandCursor: true });
 
-    // Button text
+    // Button shine effect
+    const btnShine = this.add.rectangle(0, -12, 180, 15, 0xffffff, 0.15);
+
+    // Button text with playful font
     const btnText = this.add.text(0, 0, 'PLAY AGAIN', {
-      fontSize: '22px',
-      fontFamily: 'Arial, sans-serif',
+      fontSize: '24px',
+      fontFamily: '"Comic Sans MS", "Chalkboard", cursive, sans-serif',
       color: '#ffffff',
-      fontStyle: 'bold'
+      fontStyle: 'bold',
+      stroke: '#2563eb',
+      strokeThickness: 2
     }).setOrigin(0.5);
 
-    btnContainer.add([btnBg, btnText]);
+    btnContainer.add([btnBg, btnShine, btnText]);
+
+    // Entrance animation
+    btnContainer.setScale(0);
+    this.tweens.add({
+      targets: btnContainer,
+      scale: 1,
+      duration: 400,
+      ease: 'Back.easeOut',
+      delay: 500
+    });
+
+    // Gentle floating animation
+    this.tweens.add({
+      targets: btnContainer,
+      y: yPos - 5,
+      duration: 1500,
+      yoyo: true,
+      repeat: -1,
+      ease: 'Sine.easeInOut',
+      delay: 900
+    });
 
     // Hover effects
     btnBg.on('pointerover', () => {
       btnBg.setFillStyle(0x60a5fa);
-      btnText.setScale(1.05);
+      this.tweens.add({
+        targets: btnContainer,
+        scale: 1.1,
+        duration: 100,
+        ease: 'Quad.easeOut'
+      });
     });
 
     btnBg.on('pointerout', () => {
       btnBg.setFillStyle(0x3b82f6);
-      btnText.setScale(1);
+      this.tweens.add({
+        targets: btnContainer,
+        scale: 1,
+        duration: 100,
+        ease: 'Quad.easeOut'
+      });
     });
 
     // Click to restart
@@ -2608,23 +2882,20 @@ class GameScene extends Phaser.Scene {
     // Remove keyboard listener if still attached
     this.input.keyboard.off('keydown', this.handleInitialsKeydown, this);
 
-    // Clear all grid bubbles
+    // Clear all grid bubbles (containers)
     for (const bubble of this.gridBubbles) {
       if (bubble.sprite) bubble.sprite.destroy();
-      if (bubble.shine) bubble.shine.destroy();
     }
     this.gridBubbles = [];
 
-    // Clear falling bubbles
+    // Clear falling bubbles (containers)
     for (const bubble of this.fallingBubbles) {
       if (bubble.sprite) bubble.sprite.destroy();
-      if (bubble.shine) bubble.shine.destroy();
     }
     this.fallingBubbles = [];
 
-    // Clear shooting bubble if any
+    // Clear shooting bubble if any (container)
     if (this.shootingBubble) {
-      if (this.shootingBubble.shine) this.shootingBubble.shine.destroy();
       this.shootingBubble.destroy();
       this.shootingBubble = null;
     }
@@ -2710,12 +2981,25 @@ class WaitingScene extends Phaser.Scene {
     const centerX = this.cameras.main.width / 2;
     const centerY = this.cameras.main.height / 2;
 
-    // Title
-    this.add.text(centerX, 50, 'Bubble Shooter', {
-      fontSize: '48px',
-      fontFamily: 'Arial, sans-serif',
+    // Title with playful font
+    const title = this.add.text(centerX, 50, 'Bubble Shooter', {
+      fontSize: '52px',
+      fontFamily: '"Comic Sans MS", "Chalkboard", cursive, sans-serif',
       color: '#ffffff',
+      fontStyle: 'bold',
+      stroke: '#667eea',
+      strokeThickness: 4
     }).setOrigin(0.5);
+
+    // Title animation
+    this.tweens.add({
+      targets: title,
+      y: 55,
+      duration: 2000,
+      yoyo: true,
+      repeat: -1,
+      ease: 'Sine.easeInOut'
+    });
 
     // QR code placeholder - will be positioned after generation
     this.qrContainer = this.add.container(centerX, centerY - 30);
@@ -2723,22 +3007,25 @@ class WaitingScene extends Phaser.Scene {
     // Waiting text below QR code area
     this.waitingText = this.add.text(centerX, centerY + 150, 'Connecting to server...', {
       fontSize: '24px',
-      fontFamily: 'Arial, sans-serif',
+      fontFamily: '"Comic Sans MS", "Chalkboard", cursive, sans-serif',
       color: '#888888',
     }).setOrigin(0.5);
 
     // Room code display (initially hidden)
     this.roomCodeText = this.add.text(centerX, centerY + 190, '', {
       fontSize: '18px',
-      fontFamily: 'monospace',
+      fontFamily: '"Comic Sans MS", "Chalkboard", cursive, sans-serif',
       color: '#666666',
     }).setOrigin(0.5);
 
     // Connected confirmation text (initially hidden)
     this.connectedText = this.add.text(centerX, centerY, 'Controller connected!', {
       fontSize: '32px',
-      fontFamily: 'Arial, sans-serif',
+      fontFamily: '"Comic Sans MS", "Chalkboard", cursive, sans-serif',
       color: '#4ade80',
+      fontStyle: 'bold',
+      stroke: '#000000',
+      strokeThickness: 2
     }).setOrigin(0.5).setVisible(false);
 
     // Connect to WebSocket server
