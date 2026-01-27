@@ -251,6 +251,284 @@ class SoundManager {
 // Global sound manager instance
 const soundManager = new SoundManager();
 
+// Music Manager for procedural background music
+class MusicManager {
+  constructor() {
+    this.audioContext = null;
+    this.masterGain = null;
+    this.initialized = false;
+    this.isPlaying = false;
+    this.isMuted = false;
+    this.currentTempo = 120; // BPM
+    this.baseTempo = 120;
+    this.isTenseMode = false;
+
+    // Oscillators and nodes for music
+    this.bassOsc = null;
+    this.melodyOsc = null;
+    this.harmonyOsc = null;
+    this.noiseSource = null;
+
+    // Timing
+    this.nextNoteTime = 0;
+    this.currentBeat = 0;
+    this.scheduleAheadTime = 0.1;
+    this.lookahead = 25; // ms
+    this.timerID = null;
+
+    // Music patterns - upbeat cartoon style (pentatonic scale for playful feel)
+    // C pentatonic: C, D, E, G, A
+    this.normalBassPattern = [130.81, 130.81, 164.81, 196.00, 164.81, 130.81, 196.00, 164.81]; // C3-based
+    this.normalMelodyPattern = [523.25, 587.33, 659.25, 783.99, 659.25, 587.33, 523.25, 783.99]; // C5-based
+
+    // Tense patterns - minor feel, faster rhythm
+    this.tenseBassPattern = [130.81, 155.56, 130.81, 196.00, 155.56, 130.81, 155.56, 196.00]; // With Eb (minor 3rd)
+    this.tenseMelodyPattern = [523.25, 622.25, 523.25, 783.99, 622.25, 523.25, 622.25, 783.99]; // With Eb5
+
+    // Load mute preference from localStorage
+    this.loadMutePreference();
+  }
+
+  loadMutePreference() {
+    try {
+      const stored = localStorage.getItem('bubbleShooterMusicMuted');
+      if (stored !== null) {
+        this.isMuted = stored === 'true';
+      }
+    } catch {
+      // Ignore localStorage errors
+    }
+  }
+
+  saveMutePreference() {
+    try {
+      localStorage.setItem('bubbleShooterMusicMuted', this.isMuted.toString());
+    } catch {
+      // Ignore localStorage errors
+    }
+  }
+
+  init() {
+    if (this.initialized) return;
+
+    try {
+      this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      this.masterGain = this.audioContext.createGain();
+      this.masterGain.gain.value = this.isMuted ? 0 : 0.15; // Lower volume for background music
+      this.masterGain.connect(this.audioContext.destination);
+      this.initialized = true;
+    } catch {
+      // Web Audio API not supported
+    }
+  }
+
+  resume() {
+    if (this.audioContext && this.audioContext.state === 'suspended') {
+      this.audioContext.resume();
+    }
+  }
+
+  setMuted(muted) {
+    this.isMuted = muted;
+    this.saveMutePreference();
+
+    if (this.masterGain) {
+      this.masterGain.gain.setValueAtTime(
+        muted ? 0 : 0.15,
+        this.audioContext.currentTime
+      );
+    }
+  }
+
+  toggleMute() {
+    this.setMuted(!this.isMuted);
+    return this.isMuted;
+  }
+
+  // Update tempo based on score (higher score = slightly faster)
+  updateTempo(score) {
+    // Increase tempo by 1 BPM per 100 points, max 150 BPM
+    const tempoBonus = Math.floor(score / 100);
+    this.currentTempo = Math.min(this.baseTempo + tempoBonus, 150);
+  }
+
+  // Switch between normal and tense mode
+  setTenseMode(tense) {
+    if (this.isTenseMode !== tense) {
+      this.isTenseMode = tense;
+      // Tense mode also increases base tempo by 20 BPM
+      this.baseTempo = tense ? 140 : 120;
+    }
+  }
+
+  start() {
+    if (!this.initialized || this.isPlaying) return;
+
+    this.resume();
+    this.isPlaying = true;
+    this.currentBeat = 0;
+    this.nextNoteTime = this.audioContext.currentTime;
+
+    // Start the scheduler
+    this.scheduler();
+  }
+
+  stop() {
+    this.isPlaying = false;
+
+    if (this.timerID) {
+      clearTimeout(this.timerID);
+      this.timerID = null;
+    }
+  }
+
+  scheduler() {
+    if (!this.isPlaying) return;
+
+    // Schedule notes ahead of time
+    while (this.nextNoteTime < this.audioContext.currentTime + this.scheduleAheadTime) {
+      this.scheduleNote(this.currentBeat, this.nextNoteTime);
+      this.advanceNote();
+    }
+
+    // Call again
+    this.timerID = setTimeout(() => this.scheduler(), this.lookahead);
+  }
+
+  advanceNote() {
+    // Move to next beat
+    const secondsPerBeat = 60.0 / this.currentTempo;
+    this.nextNoteTime += secondsPerBeat * 0.5; // Eighth notes
+    this.currentBeat = (this.currentBeat + 1) % 8;
+  }
+
+  scheduleNote(beat, time) {
+    const bassPattern = this.isTenseMode ? this.tenseBassPattern : this.normalBassPattern;
+    const melodyPattern = this.isTenseMode ? this.tenseMelodyPattern : this.normalMelodyPattern;
+
+    const duration = 60.0 / this.currentTempo * 0.4;
+
+    // Bass note (every beat)
+    this.playBassNote(bassPattern[beat], time, duration);
+
+    // Melody note (on beats 0, 2, 4, 6 for normal, every beat for tense)
+    if (this.isTenseMode || beat % 2 === 0) {
+      this.playMelodyNote(melodyPattern[beat], time, duration * 0.8);
+    }
+
+    // Harmony on beats 0 and 4
+    if (beat === 0 || beat === 4) {
+      this.playHarmonyChord(bassPattern[beat], time, duration * 2);
+    }
+
+    // Percussion-like sound on off-beats in tense mode
+    if (this.isTenseMode && beat % 2 === 1) {
+      this.playPercussion(time, duration * 0.5);
+    }
+  }
+
+  playBassNote(freq, time, duration) {
+    const osc = this.audioContext.createOscillator();
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(freq / 2, time); // One octave lower
+
+    const gain = this.audioContext.createGain();
+    gain.gain.setValueAtTime(0.4, time);
+    gain.gain.exponentialRampToValueAtTime(0.01, time + duration);
+
+    // Low-pass filter for warmer bass
+    const filter = this.audioContext.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(300, time);
+
+    osc.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.masterGain);
+
+    osc.start(time);
+    osc.stop(time + duration);
+  }
+
+  playMelodyNote(freq, time, duration) {
+    const osc = this.audioContext.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(freq, time);
+
+    // Add slight vibrato for cartoon feel
+    const vibrato = this.audioContext.createOscillator();
+    vibrato.frequency.setValueAtTime(5, time);
+    const vibratoGain = this.audioContext.createGain();
+    vibratoGain.gain.setValueAtTime(3, time);
+    vibrato.connect(vibratoGain);
+    vibratoGain.connect(osc.frequency);
+
+    const gain = this.audioContext.createGain();
+    gain.gain.setValueAtTime(0.25, time);
+    gain.gain.exponentialRampToValueAtTime(0.01, time + duration);
+
+    osc.connect(gain);
+    gain.connect(this.masterGain);
+
+    osc.start(time);
+    vibrato.start(time);
+    osc.stop(time + duration);
+    vibrato.stop(time + duration);
+  }
+
+  playHarmonyChord(rootFreq, time, duration) {
+    // Play a simple fifth harmony
+    const freqs = [rootFreq, rootFreq * 1.5]; // Root and fifth
+
+    for (const freq of freqs) {
+      const osc = this.audioContext.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, time);
+
+      const gain = this.audioContext.createGain();
+      gain.gain.setValueAtTime(0.08, time);
+      gain.gain.exponentialRampToValueAtTime(0.01, time + duration);
+
+      osc.connect(gain);
+      gain.connect(this.masterGain);
+
+      osc.start(time);
+      osc.stop(time + duration);
+    }
+  }
+
+  playPercussion(time, duration) {
+    // Create a short noise burst for hi-hat like sound
+    const bufferSize = this.audioContext.sampleRate * 0.05;
+    const buffer = this.audioContext.createBuffer(1, bufferSize, this.audioContext.sampleRate);
+    const data = buffer.getChannelData(0);
+
+    for (let i = 0; i < bufferSize; i++) {
+      data[i] = (Math.random() * 2 - 1) * (1 - i / bufferSize);
+    }
+
+    const noise = this.audioContext.createBufferSource();
+    noise.buffer = buffer;
+
+    const filter = this.audioContext.createBiquadFilter();
+    filter.type = 'highpass';
+    filter.frequency.setValueAtTime(8000, time);
+
+    const gain = this.audioContext.createGain();
+    gain.gain.setValueAtTime(0.15, time);
+    gain.gain.exponentialRampToValueAtTime(0.01, time + duration);
+
+    noise.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.masterGain);
+
+    noise.start(time);
+    noise.stop(time + duration);
+  }
+}
+
+// Global music manager instance
+const musicManager = new MusicManager();
+
 // All bubble colors available in the game (8 total)
 const ALL_BUBBLE_COLORS = [
   0xff6b6b, // Red
@@ -395,10 +673,67 @@ class GameScene extends Phaser.Scene {
     // Start the descent timer for endless mode
     this.startDescentTimer();
 
+    // Create mute toggle button
+    this.createMuteButton(width);
+
+    // Initialize and start background music
+    this.startBackgroundMusic();
+
     // Listen for shoot and aim commands from controller
     if (this.ws) {
       this.setupWebSocketHandlers();
     }
+  }
+
+  createMuteButton(width) {
+    // Mute button in top-right corner
+    const btnX = width - 50;
+    const btnY = 30;
+
+    // Button background
+    this.muteButton = this.add.rectangle(btnX, btnY, 60, 35, 0x000000, 0.4)
+      .setStrokeStyle(2, 0xffffff, 0.3)
+      .setInteractive({ useHandCursor: true });
+
+    // Music icon and state text
+    this.muteIcon = this.add.text(btnX, btnY, musicManager.isMuted ? '🔇' : '🎵', {
+      fontSize: '20px',
+      fontFamily: 'Arial, sans-serif'
+    }).setOrigin(0.5);
+
+    // Hover effects
+    this.muteButton.on('pointerover', () => {
+      this.muteButton.setFillStyle(0x333333, 0.6);
+    });
+
+    this.muteButton.on('pointerout', () => {
+      this.muteButton.setFillStyle(0x000000, 0.4);
+    });
+
+    // Click to toggle mute
+    this.muteButton.on('pointerdown', () => {
+      const nowMuted = musicManager.toggleMute();
+      this.muteIcon.setText(nowMuted ? '🔇' : '🎵');
+    });
+  }
+
+  startBackgroundMusic() {
+    // Initialize music manager (requires user interaction, but will work after first shoot)
+    musicManager.init();
+    musicManager.start();
+  }
+
+  // Check if any bubble is dangerously close to the bottom (tense mode)
+  checkTenseMode() {
+    const dangerThreshold = this.gameArea.bottom - ROW_HEIGHT * 3; // Within 3 rows of bottom
+
+    for (const bubble of this.gridBubbles) {
+      if (bubble.y >= dangerThreshold) {
+        musicManager.setTenseMode(true);
+        return;
+      }
+    }
+    musicManager.setTenseMode(false);
   }
 
   setupWebSocketHandlers() {
@@ -629,6 +964,9 @@ class GameScene extends Phaser.Scene {
 
     // Update falling bubbles
     this.updateFallingBubbles();
+
+    // Check for tense mode (bubbles near bottom)
+    this.checkTenseMode();
   }
 
   updateShootingBubble() {
@@ -1559,6 +1897,9 @@ class GameScene extends Phaser.Scene {
 
     // Update descent interval based on new score
     this.updateDescentInterval();
+
+    // Update music tempo based on score
+    musicManager.updateTempo(this.score);
   }
 
   // Calculate descent interval based on current score
@@ -2308,12 +2649,20 @@ class GameScene extends Phaser.Scene {
 
     // Start descent timer
     this.startDescentTimer();
+
+    // Reset and restart background music
+    musicManager.setTenseMode(false);
+    musicManager.updateTempo(0);
+    musicManager.start();
   }
 
   // Trigger game over state
   triggerGameOver() {
     this.isGameOver = true;
     this.isPaused = true;
+
+    // Stop background music
+    musicManager.stop();
 
     // Play game over sound
     soundManager.playGameOver();
