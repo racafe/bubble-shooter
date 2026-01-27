@@ -5,14 +5,30 @@ import QRCode from 'qrcode';
 const WS_URL = `ws://${window.location.hostname}:3000`;
 const CONTROLLER_BASE_URL = `http://${window.location.hostname}:5173/controller.html`;
 
-// Bubble colors for the game
-const BUBBLE_COLORS = [
+// All bubble colors available in the game (8 total)
+const ALL_BUBBLE_COLORS = [
   0xff6b6b, // Red
   0x4ecdc4, // Teal
   0xffe66d, // Yellow
   0x95e1d3, // Mint
-  0xf38181, // Coral
-  0xaa96da, // Purple
+  0xf38181, // Coral (5th color - unlocked at 500 points)
+  0xaa96da, // Purple (6th color - unlocked at 1500 points)
+  0x74b9ff, // Blue (7th color - unlocked at 3000 points)
+  0xffeaa7, // Gold (8th color - unlocked at 5000 points)
+];
+
+// Color progression thresholds
+const COLOR_THRESHOLDS = [
+  { colors: 4, score: 0 },      // Start with 4 colors
+  { colors: 5, score: 500 },    // 5th color at 500 points
+  { colors: 6, score: 1500 },   // 6th color at 1500 points
+  { colors: 7, score: 3000 },   // 7th color at 3000 points
+  { colors: 8, score: 5000 },   // 8th color at 5000 points
+];
+
+// Color names for visual indicator
+const COLOR_NAMES = [
+  'Red', 'Teal', 'Yellow', 'Mint', 'Coral', 'Purple', 'Blue', 'Gold'
 ];
 
 // Physics constants
@@ -50,6 +66,10 @@ class GameScene extends Phaser.Scene {
     this.isPaused = false;
     this.disconnectOverlay = null;
     this.disconnectText = null;
+    // Progressive color system
+    this.availableColorCount = 4; // Start with 4 colors
+    this.newColorIndicator = null;
+    this.newColorTimeout = null;
   }
 
   init(data) {
@@ -69,9 +89,9 @@ class GameScene extends Phaser.Scene {
     // Create score display in top-left corner
     this.createScoreDisplay();
 
-    // Initialize bubble colors
-    this.currentBubbleColor = Phaser.Utils.Array.GetRandom(BUBBLE_COLORS);
-    this.nextBubbleColor = Phaser.Utils.Array.GetRandom(BUBBLE_COLORS);
+    // Initialize bubble colors (using available colors based on score)
+    this.currentBubbleColor = this.getRandomAvailableColor();
+    this.nextBubbleColor = this.getRandomAvailableColor();
 
     // Create shooter and bubble displays at bottom-center
     this.createShooter(width, height);
@@ -187,6 +207,126 @@ class GameScene extends Phaser.Scene {
       'Connection lost',
       'Server disconnected'
     );
+  }
+
+  // Get array of currently available colors based on score
+  getAvailableColors() {
+    return ALL_BUBBLE_COLORS.slice(0, this.availableColorCount);
+  }
+
+  // Get a random color from available colors
+  getRandomAvailableColor() {
+    const availableColors = this.getAvailableColors();
+    return Phaser.Utils.Array.GetRandom(availableColors);
+  }
+
+  // Check if new colors should be unlocked based on current score
+  checkColorProgression() {
+    const previousCount = this.availableColorCount;
+
+    // Find the highest threshold we've crossed
+    for (const threshold of COLOR_THRESHOLDS) {
+      if (this.score >= threshold.score && threshold.colors > this.availableColorCount) {
+        this.availableColorCount = threshold.colors;
+      }
+    }
+
+    // If we unlocked a new color, show indicator
+    if (this.availableColorCount > previousCount) {
+      const newColorIndex = this.availableColorCount - 1;
+      const newColor = ALL_BUBBLE_COLORS[newColorIndex];
+      const colorName = COLOR_NAMES[newColorIndex];
+      this.showNewColorIndicator(newColor, colorName);
+    }
+  }
+
+  // Show visual indicator when a new color is introduced
+  showNewColorIndicator(color, colorName) {
+    const { width, height } = this.cameras.main;
+
+    // Clear any existing indicator timeout
+    if (this.newColorTimeout) {
+      this.newColorTimeout.remove();
+    }
+
+    // Remove existing indicator if any
+    if (this.newColorIndicator) {
+      this.newColorIndicator.destroy();
+    }
+
+    // Create container for the indicator
+    this.newColorIndicator = this.add.container(width / 2, height / 2 - 100);
+    this.newColorIndicator.setDepth(50);
+
+    // Background panel
+    const panel = this.add.rectangle(0, 0, 280, 80, 0x000000, 0.8);
+    panel.setStrokeStyle(3, color, 1);
+
+    // "NEW COLOR!" text
+    const titleText = this.add.text(0, -20, 'NEW COLOR!', {
+      fontSize: '22px',
+      fontFamily: 'Arial, sans-serif',
+      color: '#ffffff',
+      fontStyle: 'bold'
+    }).setOrigin(0.5);
+
+    // Color name and sample bubble
+    const sampleBubble = this.add.circle(-60, 15, 15, color);
+    sampleBubble.setStrokeStyle(2, 0xffffff, 0.8);
+
+    // Add shine to sample bubble
+    const shine = this.add.circle(-66, 9, 4, 0xffffff, 0.6);
+
+    const nameText = this.add.text(0, 15, colorName, {
+      fontSize: '20px',
+      fontFamily: 'Arial, sans-serif',
+      color: '#' + color.toString(16).padStart(6, '0'),
+      fontStyle: 'bold'
+    }).setOrigin(0, 0.5);
+
+    // Add all to container
+    this.newColorIndicator.add([panel, titleText, sampleBubble, shine, nameText]);
+
+    // Animate in with scale and fade
+    this.newColorIndicator.setScale(0.5);
+    this.newColorIndicator.setAlpha(0);
+
+    this.tweens.add({
+      targets: this.newColorIndicator,
+      scale: 1,
+      alpha: 1,
+      duration: 300,
+      ease: 'Back.easeOut'
+    });
+
+    // Pulsing glow effect on the panel
+    this.tweens.add({
+      targets: panel,
+      alpha: 0.6,
+      yoyo: true,
+      repeat: 2,
+      duration: 200,
+      ease: 'Sine.easeInOut'
+    });
+
+    // Hide after 2.5 seconds
+    this.newColorTimeout = this.time.delayedCall(2500, () => {
+      if (this.newColorIndicator) {
+        this.tweens.add({
+          targets: this.newColorIndicator,
+          scale: 0.5,
+          alpha: 0,
+          duration: 300,
+          ease: 'Back.easeIn',
+          onComplete: () => {
+            if (this.newColorIndicator) {
+              this.newColorIndicator.destroy();
+              this.newColorIndicator = null;
+            }
+          }
+        });
+      }
+    });
   }
 
   update() {
@@ -566,14 +706,14 @@ class GameScene extends Phaser.Scene {
   }
 
   createInitialBubbles() {
-    // Create GRID_ROWS of bubbles at the top
+    // Create GRID_ROWS of bubbles at the top using available colors
     for (let row = 0; row < GRID_ROWS; row++) {
       // Odd rows have one fewer bubble and are offset
       const isOddRow = row % 2 === 1;
       const bubblesInRow = isOddRow ? this.bubblesPerRow - 1 : this.bubblesPerRow;
 
       for (let col = 0; col < bubblesInRow; col++) {
-        const color = Phaser.Utils.Array.GetRandom(BUBBLE_COLORS);
+        const color = this.getRandomAvailableColor();
         this.addBubbleToGrid(row, col, color);
       }
     }
@@ -993,11 +1133,11 @@ class GameScene extends Phaser.Scene {
       }
     };
 
-    // Cycle colors for next shot
+    // Cycle colors for next shot (using available colors based on score)
     this.currentBubbleColor = this.nextBubbleColor;
     this.currentBubble.setFillStyle(this.currentBubbleColor);
 
-    this.nextBubbleColor = Phaser.Utils.Array.GetRandom(BUBBLE_COLORS);
+    this.nextBubbleColor = this.getRandomAvailableColor();
     this.nextBubble.setFillStyle(this.nextBubbleColor);
   }
 
@@ -1109,6 +1249,9 @@ class GameScene extends Phaser.Scene {
   updateScore(points) {
     this.score += points;
     this.scoreText.setText(this.score.toString());
+
+    // Check if we've unlocked new colors
+    this.checkColorProgression();
   }
 }
 
