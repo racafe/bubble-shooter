@@ -46,6 +46,10 @@ class GameScene extends Phaser.Scene {
     this.bubblesPerRow = 0; // Calculated based on game area width
     // Falling bubbles tracking
     this.fallingBubbles = []; // Array of bubbles falling due to disconnection
+    // Connection state
+    this.isPaused = false;
+    this.disconnectOverlay = null;
+    this.disconnectText = null;
   }
 
   init(data) {
@@ -81,22 +85,116 @@ class GameScene extends Phaser.Scene {
     // Create initial rows of bubbles
     this.createInitialBubbles();
 
+    // Create disconnect overlay (initially hidden)
+    this.createDisconnectOverlay(width, height);
+
     // Listen for shoot and aim commands from controller
     if (this.ws) {
-      this.ws.onmessage = (event) => {
-        const message = JSON.parse(event.data);
-        if (message.type === 'game_message') {
-          if (message.data.type === 'shoot') {
-            this.handleShoot(message.data.angle);
-          } else if (message.data.type === 'aim') {
-            this.handleAim(message.data.angle);
-          }
-        }
-      };
+      this.setupWebSocketHandlers();
     }
   }
 
+  setupWebSocketHandlers() {
+    this.ws.onmessage = (event) => {
+      const message = JSON.parse(event.data);
+      if (message.type === 'game_message') {
+        if (message.data.type === 'shoot') {
+          this.handleShoot(message.data.angle);
+        } else if (message.data.type === 'aim') {
+          this.handleAim(message.data.angle);
+        }
+      } else if (message.type === 'peer_disconnected') {
+        this.onControllerDisconnected();
+      } else if (message.type === 'peer_connected' || message.type === 'peer_reconnected') {
+        this.onControllerReconnected();
+      }
+    };
+
+    this.ws.onclose = () => {
+      // Server connection lost
+      this.onServerDisconnected();
+    };
+
+    this.ws.onerror = () => {
+      this.onServerDisconnected();
+    };
+  }
+
+  createDisconnectOverlay(width, height) {
+    // Semi-transparent background
+    this.disconnectOverlay = this.add.rectangle(
+      width / 2,
+      height / 2,
+      width,
+      height,
+      0x000000,
+      0.7
+    );
+    this.disconnectOverlay.setDepth(100);
+    this.disconnectOverlay.setVisible(false);
+
+    // Disconnect message text
+    this.disconnectText = this.add.text(width / 2, height / 2 - 20, '', {
+      fontSize: '28px',
+      fontFamily: 'Arial, sans-serif',
+      color: '#f59e0b',
+      fontStyle: 'bold',
+      align: 'center'
+    }).setOrigin(0.5);
+    this.disconnectText.setDepth(101);
+    this.disconnectText.setVisible(false);
+
+    // Subtext for additional info
+    this.disconnectSubtext = this.add.text(width / 2, height / 2 + 30, '', {
+      fontSize: '18px',
+      fontFamily: 'Arial, sans-serif',
+      color: '#888888',
+      align: 'center'
+    }).setOrigin(0.5);
+    this.disconnectSubtext.setDepth(101);
+    this.disconnectSubtext.setVisible(false);
+  }
+
+  showDisconnectOverlay(mainText, subText = '') {
+    this.isPaused = true;
+    this.disconnectOverlay.setVisible(true);
+    this.disconnectText.setText(mainText);
+    this.disconnectText.setVisible(true);
+    this.disconnectSubtext.setText(subText);
+    this.disconnectSubtext.setVisible(true);
+  }
+
+  hideDisconnectOverlay() {
+    this.isPaused = false;
+    this.disconnectOverlay.setVisible(false);
+    this.disconnectText.setVisible(false);
+    this.disconnectSubtext.setVisible(false);
+  }
+
+  onControllerDisconnected() {
+    this.showDisconnectOverlay(
+      'Controller disconnected',
+      'Waiting for reconnection...'
+    );
+  }
+
+  onControllerReconnected() {
+    this.hideDisconnectOverlay();
+  }
+
+  onServerDisconnected() {
+    this.showDisconnectOverlay(
+      'Connection lost',
+      'Server disconnected'
+    );
+  }
+
   update() {
+    // Don't update game logic when paused
+    if (this.isPaused) {
+      return;
+    }
+
     // Update shooting bubble physics
     if (this.shootingBubble && this.shootingBubble.active) {
       this.updateShootingBubble();
@@ -269,6 +367,9 @@ class GameScene extends Phaser.Scene {
   }
 
   handleAim(angle) {
+    // Ignore aim when paused
+    if (this.isPaused) return;
+
     this.isAiming = true;
     this.aimAngle = angle;
     this.drawTrajectory(angle);
@@ -837,7 +938,8 @@ class GameScene extends Phaser.Scene {
   }
 
   handleShoot(angle) {
-    // Don't shoot if already shooting
+    // Don't shoot if paused or already shooting
+    if (this.isPaused) return;
     if (this.shootingBubble && this.shootingBubble.active) {
       return;
     }
