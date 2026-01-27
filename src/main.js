@@ -5,6 +5,252 @@ import QRCode from 'qrcode';
 const WS_URL = `ws://${window.location.hostname}:3000`;
 const CONTROLLER_BASE_URL = `http://${window.location.hostname}:5173/controller.html`;
 
+// Sound Manager using Web Audio API for procedural sound generation
+class SoundManager {
+  constructor() {
+    this.audioContext = null;
+    this.masterGain = null;
+    this.initialized = false;
+  }
+
+  // Initialize audio context (must be called after user interaction)
+  init() {
+    if (this.initialized) return;
+
+    try {
+      this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      this.masterGain = this.audioContext.createGain();
+      this.masterGain.gain.value = 0.3; // Master volume
+      this.masterGain.connect(this.audioContext.destination);
+      this.initialized = true;
+    } catch {
+      // Web Audio API not supported, sounds will be silently disabled
+    }
+  }
+
+  // Resume audio context if suspended (required for some browsers)
+  resume() {
+    if (this.audioContext && this.audioContext.state === 'suspended') {
+      this.audioContext.resume();
+    }
+  }
+
+  // Play shoot sound - quick "whoosh" effect
+  playShoot() {
+    if (!this.initialized) return;
+    this.resume();
+
+    const now = this.audioContext.currentTime;
+
+    // Create noise for whoosh
+    const bufferSize = this.audioContext.sampleRate * 0.15;
+    const buffer = this.audioContext.createBuffer(1, bufferSize, this.audioContext.sampleRate);
+    const data = buffer.getChannelData(0);
+
+    for (let i = 0; i < bufferSize; i++) {
+      data[i] = (Math.random() * 2 - 1) * (1 - i / bufferSize);
+    }
+
+    const noise = this.audioContext.createBufferSource();
+    noise.buffer = buffer;
+
+    // Bandpass filter for whoosh character
+    const filter = this.audioContext.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.frequency.setValueAtTime(2000, now);
+    filter.frequency.exponentialRampToValueAtTime(800, now + 0.1);
+    filter.Q.value = 1;
+
+    const gain = this.audioContext.createGain();
+    gain.gain.setValueAtTime(0.4, now);
+    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.15);
+
+    noise.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.masterGain);
+
+    noise.start(now);
+    noise.stop(now + 0.15);
+  }
+
+  // Play bounce sound - quick "thunk"
+  playBounce() {
+    if (!this.initialized) return;
+    this.resume();
+
+    const now = this.audioContext.currentTime;
+
+    const osc = this.audioContext.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(300, now);
+    osc.frequency.exponentialRampToValueAtTime(150, now + 0.05);
+
+    const gain = this.audioContext.createGain();
+    gain.gain.setValueAtTime(0.3, now);
+    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.08);
+
+    osc.connect(gain);
+    gain.connect(this.masterGain);
+
+    osc.start(now);
+    osc.stop(now + 0.08);
+  }
+
+  // Play stick sound - soft "plop"
+  playStick() {
+    if (!this.initialized) return;
+    this.resume();
+
+    const now = this.audioContext.currentTime;
+
+    const osc = this.audioContext.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(400, now);
+    osc.frequency.exponentialRampToValueAtTime(200, now + 0.1);
+
+    const osc2 = this.audioContext.createOscillator();
+    osc2.type = 'triangle';
+    osc2.frequency.setValueAtTime(600, now);
+    osc2.frequency.exponentialRampToValueAtTime(300, now + 0.08);
+
+    const gain = this.audioContext.createGain();
+    gain.gain.setValueAtTime(0.25, now);
+    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.12);
+
+    osc.connect(gain);
+    osc2.connect(gain);
+    gain.connect(this.masterGain);
+
+    osc.start(now);
+    osc2.start(now);
+    osc.stop(now + 0.12);
+    osc2.stop(now + 0.1);
+  }
+
+  // Play pop sound - pitch varies with combo size (higher pitch for larger combos)
+  playPop(comboSize = 3) {
+    if (!this.initialized) return;
+    this.resume();
+
+    const now = this.audioContext.currentTime;
+
+    // Base frequency increases with combo size
+    const baseFreq = 400 + (comboSize - 3) * 80;
+
+    const osc = this.audioContext.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(baseFreq, now);
+    osc.frequency.exponentialRampToValueAtTime(baseFreq * 2, now + 0.02);
+    osc.frequency.exponentialRampToValueAtTime(baseFreq * 0.5, now + 0.1);
+
+    // Add harmonics for richer sound
+    const osc2 = this.audioContext.createOscillator();
+    osc2.type = 'triangle';
+    osc2.frequency.setValueAtTime(baseFreq * 1.5, now);
+    osc2.frequency.exponentialRampToValueAtTime(baseFreq * 0.75, now + 0.08);
+
+    const gain = this.audioContext.createGain();
+    gain.gain.setValueAtTime(0.35, now);
+    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.15);
+
+    osc.connect(gain);
+    osc2.connect(gain);
+    gain.connect(this.masterGain);
+
+    osc.start(now);
+    osc2.start(now);
+    osc.stop(now + 0.15);
+    osc2.stop(now + 0.1);
+  }
+
+  // Play falling sound - descending "whooo"
+  playFall() {
+    if (!this.initialized) return;
+    this.resume();
+
+    const now = this.audioContext.currentTime;
+
+    const osc = this.audioContext.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(600, now);
+    osc.frequency.exponentialRampToValueAtTime(150, now + 0.3);
+
+    const gain = this.audioContext.createGain();
+    gain.gain.setValueAtTime(0.2, now);
+    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
+
+    osc.connect(gain);
+    gain.connect(this.masterGain);
+
+    osc.start(now);
+    osc.stop(now + 0.3);
+  }
+
+  // Play warning sound - urgent beep sequence
+  playWarning() {
+    if (!this.initialized) return;
+    this.resume();
+
+    const now = this.audioContext.currentTime;
+
+    // Two quick beeps
+    for (let i = 0; i < 2; i++) {
+      const offset = i * 0.15;
+
+      const osc = this.audioContext.createOscillator();
+      osc.type = 'square';
+      osc.frequency.setValueAtTime(880, now + offset);
+
+      const gain = this.audioContext.createGain();
+      gain.gain.setValueAtTime(0, now + offset);
+      gain.gain.linearRampToValueAtTime(0.2, now + offset + 0.02);
+      gain.gain.linearRampToValueAtTime(0.2, now + offset + 0.08);
+      gain.gain.linearRampToValueAtTime(0, now + offset + 0.1);
+
+      osc.connect(gain);
+      gain.connect(this.masterGain);
+
+      osc.start(now + offset);
+      osc.stop(now + offset + 0.1);
+    }
+  }
+
+  // Play game over sound - sad descending tones
+  playGameOver() {
+    if (!this.initialized) return;
+    this.resume();
+
+    const now = this.audioContext.currentTime;
+
+    // Three descending notes
+    const notes = [440, 349, 262]; // A4, F4, C4
+    const durations = [0.3, 0.3, 0.6];
+
+    let time = 0;
+    for (let i = 0; i < notes.length; i++) {
+      const osc = this.audioContext.createOscillator();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(notes[i], now + time);
+
+      const gain = this.audioContext.createGain();
+      gain.gain.setValueAtTime(0.3, now + time);
+      gain.gain.setValueAtTime(0.3, now + time + durations[i] * 0.7);
+      gain.gain.exponentialRampToValueAtTime(0.01, now + time + durations[i]);
+
+      osc.connect(gain);
+      gain.connect(this.masterGain);
+
+      osc.start(now + time);
+      osc.stop(now + time + durations[i]);
+
+      time += durations[i];
+    }
+  }
+}
+
+// Global sound manager instance
+const soundManager = new SoundManager();
+
 // All bubble colors available in the game (8 total)
 const ALL_BUBBLE_COLORS = [
   0xff6b6b, // Red
@@ -398,10 +644,12 @@ class GameScene extends Phaser.Scene {
       bubble.x = this.gameArea.left + BUBBLE_RADIUS;
       bubble.velocityX = Math.abs(bubble.velocityX); // Bounce right
       bubble.rotationSpeed = Math.abs(bubble.rotationSpeed); // Rotate based on direction
+      soundManager.playBounce();
     } else if (bubble.x + BUBBLE_RADIUS >= this.gameArea.right) {
       bubble.x = this.gameArea.right - BUBBLE_RADIUS;
       bubble.velocityX = -Math.abs(bubble.velocityX); // Bounce left
       bubble.rotationSpeed = -Math.abs(bubble.rotationSpeed); // Rotate based on direction
+      soundManager.playBounce();
     }
 
     // Check for ceiling collision (stick immediately)
@@ -482,6 +730,9 @@ class GameScene extends Phaser.Scene {
         }
       },
       onComplete: () => {
+        // Play stick sound
+        soundManager.playStick();
+
         // Create the visual snap effect
         this.createSnapEffect(targetPos.x, targetPos.y);
 
@@ -917,7 +1168,7 @@ class GameScene extends Phaser.Scene {
     if (connected.length >= 3) {
       // Pop all connected bubbles
       const popScore = connected.length * POINTS_PER_POP;
-      this.popBubbles(connected);
+      this.popBubbles(connected, connected.length);
 
       // After popping, check for floating bubbles
       this.time.delayedCall(100, () => {
@@ -934,7 +1185,10 @@ class GameScene extends Phaser.Scene {
   }
 
   // Pop bubbles with animation
-  popBubbles(bubbles) {
+  popBubbles(bubbles, comboSize = 3) {
+    // Play pop sound with pitch based on combo size (once for the whole group)
+    soundManager.playPop(comboSize);
+
     for (let i = 0; i < bubbles.length; i++) {
       const bubble = bubbles[i];
 
@@ -1055,6 +1309,11 @@ class GameScene extends Phaser.Scene {
 
   // Make floating bubbles fall with gravity
   dropFloatingBubbles(bubbles) {
+    // Play falling sound once for the group
+    if (bubbles.length > 0) {
+      soundManager.playFall();
+    }
+
     for (const bubble of bubbles) {
       // Remove from grid but keep sprites
       const index = this.gridBubbles.indexOf(bubble);
@@ -1124,6 +1383,10 @@ class GameScene extends Phaser.Scene {
     if (this.shootingBubble && this.shootingBubble.active) {
       return;
     }
+
+    // Initialize and play shoot sound
+    soundManager.init();
+    soundManager.playShoot();
 
     // Clear trajectory preview
     this.trajectoryGraphics.clear();
@@ -1392,6 +1655,9 @@ class GameScene extends Phaser.Scene {
 
   // Show warning indicator with animation
   showWarningIndicator() {
+    // Play warning sound
+    soundManager.playWarning();
+
     this.warningCountdownText.setText('3');
     this.warningIndicator.setVisible(true);
     this.warningIndicator.setAlpha(0);
@@ -2048,6 +2314,9 @@ class GameScene extends Phaser.Scene {
   triggerGameOver() {
     this.isGameOver = true;
     this.isPaused = true;
+
+    // Play game over sound
+    soundManager.playGameOver();
 
     // Stop all timers
     if (this.descentTimer) {
