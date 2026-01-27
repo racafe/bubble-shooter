@@ -15,12 +15,20 @@ const BUBBLE_COLORS = [
   0xaa96da, // Purple
 ];
 
+// Physics constants
+const BUBBLE_SPEED = 800;
+const BUBBLE_RADIUS = 20;
+
 class GameScene extends Phaser.Scene {
   constructor() {
     super({ key: 'GameScene' });
     this.score = 0;
     this.currentBubbleColor = null;
     this.nextBubbleColor = null;
+    this.shootingBubble = null;
+    this.isAiming = false;
+    this.aimAngle = 90; // Default to straight up (degrees)
+    this.trajectoryGraphics = null;
   }
 
   init(data) {
@@ -47,15 +55,82 @@ class GameScene extends Phaser.Scene {
     // Create shooter and bubble displays at bottom-center
     this.createShooter(width, height);
 
-    // Listen for shoot commands from controller
+    // Create trajectory preview graphics
+    this.trajectoryGraphics = this.add.graphics();
+
+    // Listen for shoot and aim commands from controller
     if (this.ws) {
       this.ws.onmessage = (event) => {
         const message = JSON.parse(event.data);
-        if (message.type === 'game_message' && message.data.type === 'shoot') {
-          this.handleShoot(message.data.angle);
+        if (message.type === 'game_message') {
+          if (message.data.type === 'shoot') {
+            this.handleShoot(message.data.angle);
+          } else if (message.data.type === 'aim') {
+            this.handleAim(message.data.angle);
+          }
         }
       };
     }
+  }
+
+  update() {
+    // Update shooting bubble physics
+    if (this.shootingBubble && this.shootingBubble.active) {
+      this.updateShootingBubble();
+    }
+  }
+
+  updateShootingBubble() {
+    const bubble = this.shootingBubble;
+    const delta = this.game.loop.delta / 1000;
+
+    // Move bubble first
+    bubble.x += bubble.velocityX * delta;
+    bubble.y += bubble.velocityY * delta;
+
+    // Check for wall bounces (left and right)
+    if (bubble.x - BUBBLE_RADIUS <= this.gameArea.left) {
+      bubble.x = this.gameArea.left + BUBBLE_RADIUS;
+      bubble.velocityX = Math.abs(bubble.velocityX); // Bounce right
+      bubble.rotationSpeed = Math.abs(bubble.rotationSpeed); // Rotate based on direction
+    } else if (bubble.x + BUBBLE_RADIUS >= this.gameArea.right) {
+      bubble.x = this.gameArea.right - BUBBLE_RADIUS;
+      bubble.velocityX = -Math.abs(bubble.velocityX); // Bounce left
+      bubble.rotationSpeed = -Math.abs(bubble.rotationSpeed); // Rotate based on direction
+    }
+
+    // Check for ceiling collision (stick immediately)
+    if (bubble.y - BUBBLE_RADIUS <= this.gameArea.top) {
+      bubble.y = this.gameArea.top + BUBBLE_RADIUS;
+      this.stickBubble(bubble);
+      return;
+    }
+
+    // Rotate bubble while moving
+    bubble.rotation += bubble.rotationSpeed * delta;
+
+    // Update shine position
+    if (bubble.updateShine) {
+      bubble.updateShine();
+    }
+  }
+
+  stickBubble(bubble) {
+    // Stop the bubble and mark it as stuck
+    bubble.velocityX = 0;
+    bubble.velocityY = 0;
+    bubble.rotationSpeed = 0;
+    bubble.active = false;
+
+    // Future: Add to grid, check for matches
+    // For now, just leave it where it stuck
+    this.shootingBubble = null;
+  }
+
+  handleAim(angle) {
+    this.isAiming = true;
+    this.aimAngle = angle;
+    this.drawTrajectory(angle);
   }
 
   createGradientBackground(width, height) {
@@ -236,18 +311,164 @@ class GameScene extends Phaser.Scene {
     );
   }
 
-  handleShoot(_angle) {
-    // For now, just cycle the bubbles as visual feedback
-    // Full shooting mechanics will be implemented in later stories
-    // _angle parameter will be used for actual shooting trajectory
+  handleShoot(angle) {
+    // Don't shoot if already shooting
+    if (this.shootingBubble && this.shootingBubble.active) {
+      return;
+    }
 
-    // Move next bubble to current
+    // Clear trajectory preview
+    this.trajectoryGraphics.clear();
+    this.isAiming = false;
+
+    // Calculate velocity from angle (angle is in degrees, 90 = straight up)
+    const radians = Phaser.Math.DegToRad(angle);
+    const velocityX = Math.cos(radians) * BUBBLE_SPEED;
+    const velocityY = -Math.sin(radians) * BUBBLE_SPEED; // Negative because Y increases downward
+
+    // Get shooter position
+    const { width, height } = this.cameras.main;
+    const shooterX = width / 2;
+    const shooterY = height - 50 - 35; // Same as currentBubble position
+
+    // Create shooting bubble
+    this.shootingBubble = this.add.circle(
+      shooterX,
+      shooterY,
+      BUBBLE_RADIUS,
+      this.currentBubbleColor
+    ).setStrokeStyle(3, 0xffffff, 0.8);
+
+    // Add shine effect
+    const shine = this.add.circle(
+      shooterX - 6,
+      shooterY - 6,
+      5,
+      0xffffff,
+      0.6
+    );
+    this.shootingBubble.shine = shine;
+
+    // Set physics properties
+    this.shootingBubble.velocityX = velocityX;
+    this.shootingBubble.velocityY = velocityY;
+    this.shootingBubble.active = true;
+    this.shootingBubble.color = this.currentBubbleColor;
+
+    // Add rotation based on horizontal direction
+    this.shootingBubble.rotationSpeed = velocityX > 0 ? 5 : -5;
+
+    // Move shine with bubble in update
+    this.shootingBubble.updateShine = () => {
+      if (this.shootingBubble && shine) {
+        shine.x = this.shootingBubble.x - 6;
+        shine.y = this.shootingBubble.y - 6;
+      }
+    };
+
+    // Cycle colors for next shot
     this.currentBubbleColor = this.nextBubbleColor;
     this.currentBubble.setFillStyle(this.currentBubbleColor);
 
-    // Generate new next bubble
     this.nextBubbleColor = Phaser.Utils.Array.GetRandom(BUBBLE_COLORS);
     this.nextBubble.setFillStyle(this.nextBubbleColor);
+  }
+
+  drawTrajectory(angle) {
+    this.trajectoryGraphics.clear();
+
+    // Calculate starting position
+    const { width, height } = this.cameras.main;
+    const startX = width / 2;
+    const startY = height - 50 - 35;
+
+    // Calculate direction vector
+    const radians = Phaser.Math.DegToRad(angle);
+    let dx = Math.cos(radians);
+    let dy = -Math.sin(radians);
+
+    // Simulate trajectory with bounces
+    let x = startX;
+    let y = startY;
+    const points = [{ x, y }];
+    const maxBounces = 3;
+    let bounces = 0;
+    const stepSize = 10;
+    const maxSteps = 200;
+
+    for (let step = 0; step < maxSteps && bounces <= maxBounces; step++) {
+      x += dx * stepSize;
+      y += dy * stepSize;
+
+      // Check wall bounces
+      if (x - BUBBLE_RADIUS <= this.gameArea.left) {
+        x = this.gameArea.left + BUBBLE_RADIUS;
+        dx = Math.abs(dx);
+        bounces++;
+        points.push({ x, y, bounce: true });
+      } else if (x + BUBBLE_RADIUS >= this.gameArea.right) {
+        x = this.gameArea.right - BUBBLE_RADIUS;
+        dx = -Math.abs(dx);
+        bounces++;
+        points.push({ x, y, bounce: true });
+      }
+
+      // Check ceiling
+      if (y - BUBBLE_RADIUS <= this.gameArea.top) {
+        y = this.gameArea.top + BUBBLE_RADIUS;
+        points.push({ x, y });
+        break;
+      }
+
+      // Add point for line drawing (every few steps for performance)
+      if (step % 3 === 0) {
+        points.push({ x, y });
+      }
+    }
+
+    // Draw trajectory as dashed line
+    this.trajectoryGraphics.lineStyle(2, 0xffffff, 0.5);
+
+    for (let i = 0; i < points.length - 1; i++) {
+      const p1 = points[i];
+      const p2 = points[i + 1];
+
+      // Draw dashed segments
+      const segmentLength = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+      const dashLength = 8;
+      const gapLength = 6;
+      const dashCount = Math.floor(segmentLength / (dashLength + gapLength));
+
+      const dirX = (p2.x - p1.x) / segmentLength;
+      const dirY = (p2.y - p1.y) / segmentLength;
+
+      for (let d = 0; d < dashCount; d++) {
+        const dashStart = d * (dashLength + gapLength);
+        const dashEnd = dashStart + dashLength;
+
+        this.trajectoryGraphics.beginPath();
+        this.trajectoryGraphics.moveTo(
+          p1.x + dirX * dashStart,
+          p1.y + dirY * dashStart
+        );
+        this.trajectoryGraphics.lineTo(
+          p1.x + dirX * Math.min(dashEnd, segmentLength),
+          p1.y + dirY * Math.min(dashEnd, segmentLength)
+        );
+        this.trajectoryGraphics.strokePath();
+      }
+
+      // Draw bounce indicator
+      if (p2.bounce) {
+        this.trajectoryGraphics.fillStyle(0xffffff, 0.7);
+        this.trajectoryGraphics.fillCircle(p2.x, p2.y, 4);
+      }
+    }
+
+    // Draw target indicator at end
+    const lastPoint = points[points.length - 1];
+    this.trajectoryGraphics.lineStyle(2, 0xffffff, 0.6);
+    this.trajectoryGraphics.strokeCircle(lastPoint.x, lastPoint.y, BUBBLE_RADIUS);
   }
 
   updateScore(points) {

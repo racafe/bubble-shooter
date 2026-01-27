@@ -265,6 +265,16 @@
       }
     }
 
+    // Send aim update to desktop (for trajectory preview)
+    function sendAim(angle) {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({
+          type: 'aim',
+          data: { angle }
+        }));
+      }
+    }
+
     // Calculate angle from joystick position
     function calculateAngle(dx, dy) {
       // Convert to angle (0 = right, 90 = up, 180 = left)
@@ -301,6 +311,9 @@
 
         // Update aim line
         updateAimLine(clampedX, clampedY, distance);
+
+        // Send aim update to game for trajectory preview
+        sendAim(currentAngle);
       }
     }
 
