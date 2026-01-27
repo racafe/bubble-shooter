@@ -1,0 +1,25 @@
+{
+  "name": "bubble-shooter",
+  "version": "1.0.0",
+  "description": "Physics-based bubble shooter game with phone controller",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "lint": "eslint src/"
+  },
+  "keywords": ["game", "phaser", "bubble-shooter"],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "phaser": "^3.90.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.2",
+    "eslint": "^9.39.2",
+    "globals": "^17.2.0",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.1"
+  }
+}
