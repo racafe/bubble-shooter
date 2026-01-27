@@ -531,14 +531,14 @@ const musicManager = new MusicManager();
 
 // All bubble colors available in the game (8 total)
 const ALL_BUBBLE_COLORS = [
-  0xff6b6b, // Red
-  0x4ecdc4, // Teal
-  0xffe66d, // Yellow
-  0x95e1d3, // Mint
-  0xf38181, // Coral (5th color - unlocked at 500 points)
-  0xaa96da, // Purple (6th color - unlocked at 1500 points)
-  0x74b9ff, // Blue (7th color - unlocked at 3000 points)
-  0xffeaa7, // Gold (8th color - unlocked at 5000 points)
+  0xff3333, // Red - bright pure red
+  0x33cc33, // Green - distinct green
+  0xffff00, // Yellow - bright yellow
+  0x3366ff, // Blue - medium blue
+  0xff00ff, // Magenta (5th color - unlocked at 500 points)
+  0xff9900, // Orange (6th color - unlocked at 1500 points)
+  0x00ffff, // Cyan (7th color - unlocked at 3000 points)
+  0xcc66ff, // Violet (8th color - unlocked at 5000 points)
 ];
 
 // Color progression thresholds
@@ -552,7 +552,7 @@ const COLOR_THRESHOLDS = [
 
 // Color names for visual indicator
 const COLOR_NAMES = [
-  'Red', 'Teal', 'Yellow', 'Mint', 'Coral', 'Purple', 'Blue', 'Gold'
+  'Red', 'Green', 'Yellow', 'Blue', 'Magenta', 'Orange', 'Cyan', 'Violet'
 ];
 
 // Physics constants
@@ -579,16 +579,16 @@ const BUBBLE_DIAMETER = BUBBLE_RADIUS * 2;
 const ROW_HEIGHT = BUBBLE_DIAMETER * 0.866; // sqrt(3)/2 for hex packing
 
 // Descent constants for endless mode
-const INITIAL_DESCENT_INTERVAL = 30000; // 30 seconds initial interval
-const MIN_DESCENT_INTERVAL = 15000; // 15 seconds minimum
-const DESCENT_WARNING_TIME = 3000; // 3 second warning before descent
+const INITIAL_DESCENT_INTERVAL = 20000; // 15 seconds initial interval
+const MIN_DESCENT_INTERVAL = 6000; // 6 seconds minimum
+const DESCENT_WARNING_TIME = 2000; // 2 second warning before descent
 const DESCENT_SPEED_THRESHOLDS = [
-  { score: 0, interval: 30000 },
-  { score: 500, interval: 27000 },
-  { score: 1000, interval: 24000 },
-  { score: 2000, interval: 21000 },
-  { score: 3500, interval: 18000 },
-  { score: 5000, interval: 15000 },
+  { score: 0, interval: 20000 },
+  { score: 500, interval: 15000 },
+  { score: 1000, interval: 10000 },
+  { score: 2000, interval: 8000 },
+  { score: 3500, interval: 7000 },
+  { score: 5000, interval: 6000 },
 ];
 
 class GameScene extends Phaser.Scene {
