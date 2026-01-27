@@ -18,6 +18,11 @@ const BUBBLE_COLORS = [
 // Physics constants
 const BUBBLE_SPEED = 800;
 const BUBBLE_RADIUS = 20;
+const FALL_GRAVITY = 800; // Gravity for falling bubbles
+
+// Scoring constants
+const POINTS_PER_POP = 10;
+const POINTS_PER_FALL = 20;
 
 // Grid constants for hexagonal layout
 const GRID_ROWS = 5; // Initial rows of bubbles
@@ -39,6 +44,8 @@ class GameScene extends Phaser.Scene {
     this.gridStartY = 0; // Y position of first row (set after walls created)
     this.gridStartX = 0; // X position of first bubble in row 0
     this.bubblesPerRow = 0; // Calculated based on game area width
+    // Falling bubbles tracking
+    this.fallingBubbles = []; // Array of bubbles falling due to disconnection
   }
 
   init(data) {
@@ -94,6 +101,9 @@ class GameScene extends Phaser.Scene {
     if (this.shootingBubble && this.shootingBubble.active) {
       this.updateShootingBubble();
     }
+
+    // Update falling bubbles
+    this.updateFallingBubbles();
   }
 
   updateShootingBubble() {
@@ -201,7 +211,12 @@ class GameScene extends Phaser.Scene {
         bubble.destroy();
 
         // Add bubble to grid data structure
-        this.addBubbleToGrid(targetCell.row, targetCell.col, bubble.color);
+        const newBubble = this.addBubbleToGrid(targetCell.row, targetCell.col, bubble.color);
+
+        // Check for matches after bubble is placed
+        if (newBubble) {
+          this.checkAndPopMatches(newBubble);
+        }
       }
     });
   }
@@ -585,6 +600,240 @@ class GameScene extends Phaser.Scene {
 
     const neighbors = this.getNeighbors(row, col);
     return neighbors.some(n => this.getBubbleAtCell(n.row, n.col) !== undefined);
+  }
+
+  // Find all connected bubbles of the same color using flood fill
+  findConnectedBubbles(startBubble) {
+    const connected = [startBubble];
+    const visited = new Set([`${startBubble.row},${startBubble.col}`]);
+    const queue = [startBubble];
+
+    while (queue.length > 0) {
+      const current = queue.shift();
+      const neighbors = this.getNeighbors(current.row, current.col);
+
+      for (const neighbor of neighbors) {
+        const key = `${neighbor.row},${neighbor.col}`;
+        if (visited.has(key)) continue;
+
+        const bubble = this.getBubbleAtCell(neighbor.row, neighbor.col);
+        if (bubble && bubble.color === startBubble.color) {
+          visited.add(key);
+          connected.push(bubble);
+          queue.push(bubble);
+        }
+      }
+    }
+
+    return connected;
+  }
+
+  // Check for matches and pop if 3+ connected
+  checkAndPopMatches(newBubble) {
+    const connected = this.findConnectedBubbles(newBubble);
+
+    if (connected.length >= 3) {
+      // Pop all connected bubbles
+      const popScore = connected.length * POINTS_PER_POP;
+      this.popBubbles(connected);
+
+      // After popping, check for floating bubbles
+      this.time.delayedCall(100, () => {
+        const floating = this.findFloatingBubbles();
+        if (floating.length > 0) {
+          const fallScore = floating.length * POINTS_PER_FALL;
+          this.dropFloatingBubbles(floating);
+          this.updateScore(fallScore);
+        }
+      });
+
+      this.updateScore(popScore);
+    }
+  }
+
+  // Pop bubbles with animation
+  popBubbles(bubbles) {
+    for (let i = 0; i < bubbles.length; i++) {
+      const bubble = bubbles[i];
+
+      // Delay each pop slightly for cascade effect
+      this.time.delayedCall(i * 30, () => {
+        this.createPopEffect(bubble.x, bubble.y, bubble.color);
+        this.removeBubbleFromGrid(bubble);
+      });
+    }
+  }
+
+  // Create popping effect with particles
+  createPopEffect(x, y, color) {
+    // Central burst
+    const burst = this.add.circle(x, y, BUBBLE_RADIUS, color, 0.8);
+    this.tweens.add({
+      targets: burst,
+      scale: 1.5,
+      alpha: 0,
+      duration: 200,
+      ease: 'Quad.easeOut',
+      onComplete: () => burst.destroy()
+    });
+
+    // Particle explosion - 8 particles in a ring
+    const particleCount = 8;
+    for (let i = 0; i < particleCount; i++) {
+      const angle = (i / particleCount) * Math.PI * 2;
+      const particleRadius = 5 + Math.random() * 3;
+
+      const particle = this.add.circle(
+        x,
+        y,
+        particleRadius,
+        color,
+        0.9
+      );
+
+      const distance = BUBBLE_RADIUS * 2 + Math.random() * BUBBLE_RADIUS;
+      const targetX = x + Math.cos(angle) * distance;
+      const targetY = y + Math.sin(angle) * distance;
+
+      this.tweens.add({
+        targets: particle,
+        x: targetX,
+        y: targetY,
+        scale: 0.2,
+        alpha: 0,
+        duration: 250 + Math.random() * 100,
+        ease: 'Quad.easeOut',
+        onComplete: () => particle.destroy()
+      });
+    }
+
+    // Add white sparkle effect
+    for (let i = 0; i < 4; i++) {
+      const sparkle = this.add.circle(
+        x + (Math.random() - 0.5) * BUBBLE_RADIUS,
+        y + (Math.random() - 0.5) * BUBBLE_RADIUS,
+        3,
+        0xffffff,
+        1
+      );
+
+      this.tweens.add({
+        targets: sparkle,
+        y: sparkle.y - 20 - Math.random() * 30,
+        alpha: 0,
+        scale: 0.3,
+        duration: 300 + Math.random() * 100,
+        ease: 'Quad.easeOut',
+        onComplete: () => sparkle.destroy()
+      });
+    }
+  }
+
+  // Remove bubble from grid data structure
+  removeBubbleFromGrid(bubble) {
+    const index = this.gridBubbles.indexOf(bubble);
+    if (index > -1) {
+      // Destroy sprites
+      if (bubble.sprite) bubble.sprite.destroy();
+      if (bubble.shine) bubble.shine.destroy();
+      this.gridBubbles.splice(index, 1);
+    }
+  }
+
+  // Find bubbles that are no longer connected to the ceiling
+  findFloatingBubbles() {
+    // Mark all bubbles as potentially floating
+    const connected = new Set();
+
+    // BFS from all top-row bubbles to find connected ones
+    const queue = this.gridBubbles.filter(b => b.row === 0);
+    for (const bubble of queue) {
+      connected.add(`${bubble.row},${bubble.col}`);
+    }
+
+    while (queue.length > 0) {
+      const current = queue.shift();
+      const neighbors = this.getNeighbors(current.row, current.col);
+
+      for (const neighbor of neighbors) {
+        const key = `${neighbor.row},${neighbor.col}`;
+        if (connected.has(key)) continue;
+
+        const bubble = this.getBubbleAtCell(neighbor.row, neighbor.col);
+        if (bubble) {
+          connected.add(key);
+          queue.push(bubble);
+        }
+      }
+    }
+
+    // Return bubbles that are not connected to ceiling
+    return this.gridBubbles.filter(b => !connected.has(`${b.row},${b.col}`));
+  }
+
+  // Make floating bubbles fall with gravity
+  dropFloatingBubbles(bubbles) {
+    for (const bubble of bubbles) {
+      // Remove from grid but keep sprites
+      const index = this.gridBubbles.indexOf(bubble);
+      if (index > -1) {
+        this.gridBubbles.splice(index, 1);
+      }
+
+      // Add to falling bubbles with initial velocity
+      this.fallingBubbles.push({
+        sprite: bubble.sprite,
+        shine: bubble.shine,
+        x: bubble.x,
+        y: bubble.y,
+        velocityY: 0,
+        velocityX: (Math.random() - 0.5) * 100, // Slight horizontal spread
+        rotationSpeed: (Math.random() - 0.5) * 10
+      });
+    }
+  }
+
+  // Update falling bubbles each frame
+  updateFallingBubbles() {
+    if (this.fallingBubbles.length === 0) return;
+
+    const delta = this.game.loop.delta / 1000;
+    const toRemove = [];
+
+    for (const bubble of this.fallingBubbles) {
+      // Apply gravity
+      bubble.velocityY += FALL_GRAVITY * delta;
+
+      // Update position
+      bubble.x += bubble.velocityX * delta;
+      bubble.y += bubble.velocityY * delta;
+
+      // Update sprite position
+      if (bubble.sprite) {
+        bubble.sprite.x = bubble.x;
+        bubble.sprite.y = bubble.y;
+        bubble.sprite.rotation += bubble.rotationSpeed * delta;
+      }
+      if (bubble.shine) {
+        bubble.shine.x = bubble.x - 6;
+        bubble.shine.y = bubble.y - 6;
+      }
+
+      // Remove if off screen
+      if (bubble.y > this.cameras.main.height + 50) {
+        if (bubble.sprite) bubble.sprite.destroy();
+        if (bubble.shine) bubble.shine.destroy();
+        toRemove.push(bubble);
+      }
+    }
+
+    // Clean up off-screen bubbles
+    for (const bubble of toRemove) {
+      const index = this.fallingBubbles.indexOf(bubble);
+      if (index > -1) {
+        this.fallingBubbles.splice(index, 1);
+      }
+    }
   }
 
   handleShoot(angle) {
