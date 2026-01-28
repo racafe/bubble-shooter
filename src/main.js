@@ -5,19 +5,24 @@ import QRCode from 'qrcode';
 const GAME_HOSTNAME = window.location.hostname;
 const IS_SSL = window.location.protocol === 'https:';
 
-// WebSocket hostname: localhost in dev, ws.<domain> in production
-const WS_HOSTNAME = GAME_HOSTNAME === 'localhost' ? 'localhost' : `ws.${GAME_HOSTNAME}`;
+// Treat localhost *and* raw IP addresses as "dev" hosts.
+// This lets you hit the dev build from another device on the LAN
+// (e.g. http://192.168.2.93:5173) without breaking the URLs.
+const IS_IP_HOST = /^[0-9.]+$/.test(GAME_HOSTNAME);
+const IS_DEV_HOST = GAME_HOSTNAME === 'localhost' || IS_IP_HOST;
 
-// In dev we talk to ws://localhost:3000, in production to wss://ws.<domain> (default 443)
-const WS_URL = IS_SSL
-  ? `wss://${WS_HOSTNAME}`
-  : `ws://${WS_HOSTNAME}:3000`;
+// In dev we talk directly to ws://<host>:3000 (no ws. prefix),
+// in production we use wss://ws.<domain> (default 443).
+const WS_URL = IS_DEV_HOST || !IS_SSL
+  ? `ws://${GAME_HOSTNAME}:3000`
+  : `wss://ws.${GAME_HOSTNAME}`;
 
-// Controller is served from the main site (same origin) in production,
-// and from Vite dev server in development.
-// Use extension-less path in production so we don't rely on any .html
+// Controller is served from Vite dev server in development
+// and from the main site (same origin) in production.
+// For dev over LAN, use the same host IP as the game.
+// In production we use an extension-less path so we don't rely on any .html
 // redirects that might drop query parameters (room code).
-const CONTROLLER_BASE_URL = GAME_HOSTNAME === 'localhost'
+const CONTROLLER_BASE_URL = IS_DEV_HOST
   ? `http://${GAME_HOSTNAME}:5173/controller.html`
   : `https://${GAME_HOSTNAME}/controller`;
 
@@ -1475,19 +1480,27 @@ class GameScene extends Phaser.Scene {
   }
 
   createScoreDisplay() {
+    const width = this.scale.width;
+
+    // Centered score panel at top of screen
+    const panelWidth = 180;
+    const panelHeight = 48;
+    const panelX = (width - panelWidth) / 2;
+    const panelY = 8;
+
     // Score background panel with rounded look
     const panelShadow = this.add.graphics();
     panelShadow.fillStyle(0x000000, 0.25);
-    panelShadow.fillRoundedRect(12, 10, 160, 48, 16);
+    panelShadow.fillRoundedRect(panelX + 2, panelY + 2, panelWidth, panelHeight, 16);
 
     const panel = this.add.graphics();
     panel.fillStyle(0xffffff, 0.18);
-    panel.fillRoundedRect(10, 8, 160, 48, 16);
+    panel.fillRoundedRect(panelX, panelY, panelWidth, panelHeight, 16);
     panel.lineStyle(2, 0xffffff, 0.5);
-    panel.strokeRoundedRect(10, 8, 160, 48, 16);
+    panel.strokeRoundedRect(panelX, panelY, panelWidth, panelHeight, 16);
 
     // Score label with playful font
-    this.add.text(20, 18, 'SCORE', {
+    this.add.text(panelX + 12, panelY + 10, 'SCORE', {
       fontSize: '14px',
       fontFamily: '"Comic Sans MS", "Chalkboard", cursive, sans-serif',
       color: '#fff6ff',
@@ -1495,7 +1508,7 @@ class GameScene extends Phaser.Scene {
     });
 
     // Score value with playful bouncy font
-    this.scoreText = this.add.text(20, 35, '0', {
+    this.scoreText = this.add.text(panelX + 12, panelY + 27, '0', {
       fontSize: '22px',
       fontFamily: '"Comic Sans MS", "Chalkboard", cursive, sans-serif',
       color: '#ffe8ff',

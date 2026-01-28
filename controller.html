@@ -391,15 +391,20 @@
 
   <script type="module">
     // Configuration
+    const CONTROLLER_HOSTNAME = window.location.hostname;
     const IS_SSL = window.location.protocol === 'https:';
-    const HOSTNAME = window.location.hostname === 'localhost'
-      ? 'localhost'
-      : `ws.${window.location.hostname}`;
 
-    // In dev we talk to ws://localhost:3000, in production to wss://ws.<domain> (default 443)
-    const WS_URL = IS_SSL
-      ? `wss://${HOSTNAME}`
-      : `ws://${HOSTNAME}:3000`;
+    // Treat localhost *and* raw IP addresses as "dev" hosts so that
+    // opening the controller from another device on the LAN
+    // (e.g. http://192.168.2.93:5173/controller.html) works correctly.
+    const IS_IP_HOST = /^[0-9.]+$/.test(CONTROLLER_HOSTNAME);
+    const IS_DEV_HOST = CONTROLLER_HOSTNAME === 'localhost' || IS_IP_HOST;
+
+    // In dev we talk directly to ws://<host>:3000 (no ws. prefix),
+    // in production we use wss://ws.<domain> (default 443).
+    const WS_URL = IS_DEV_HOST || !IS_SSL
+      ? `ws://${CONTROLLER_HOSTNAME}:3000`
+      : `wss://ws.${CONTROLLER_HOSTNAME}`;
 
     // Get room code from URL
     const urlParams = new URLSearchParams(window.location.search);
