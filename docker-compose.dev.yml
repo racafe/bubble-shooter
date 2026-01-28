@@ -1,0 +1,17 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    ports:
+      - '5173:5173'  # Vite dev server
+      - '3000:3000'  # WebSocket server
+    volumes:
+      # Mount source code for hot reload
+      - .:/app
+      - /app/node_modules  # Prevent overwriting node_modules
+    environment:
+      - NODE_ENV=development
+      - PORT=3000
+    command: sh -c "node server/index.js & npm run dev"
+    restart: unless-stopped

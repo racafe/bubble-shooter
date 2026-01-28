@@ -1,0 +1,21 @@
+# Development Dockerfile
+FROM node:20-alpine
+
+WORKDIR /app
+
+# Copy package files
+COPY package*.json ./
+
+# Install all dependencies (including dev)
+RUN npm ci
+
+# Copy source files
+COPY . .
+
+# Expose ports
+# 3000 for WebSocket server
+# 5173 for Vite dev server
+EXPOSE 3000 5173
+
+# Default command (can be overridden in docker-compose)
+CMD ["sh", "-c", "node server/index.js & npm run dev"]
