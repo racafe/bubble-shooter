@@ -15,9 +15,11 @@ const WS_URL = IS_SSL
 
 // Controller is served from the main site (same origin) in production,
 // and from Vite dev server in development.
+// Use extension-less path in production so we don't rely on any .html
+// redirects that might drop query parameters (room code).
 const CONTROLLER_BASE_URL = GAME_HOSTNAME === 'localhost'
   ? `http://${GAME_HOSTNAME}:5173/controller.html`
-  : `https://${GAME_HOSTNAME}/controller.html`;
+  : `https://${GAME_HOSTNAME}/controller`;
 
 // Sound Manager using Web Audio API for procedural sound generation
 class SoundManager {
