@@ -47,9 +47,10 @@ RUN npm install -g serve
 
 # Copy built files from builder
 COPY --from=builder /app/dist ./dist
+COPY serve.json ./serve.json
 
 # Expose web server port
 EXPOSE 5173
 
 # Start static file server
-CMD ["serve", "-s", "dist", "-l", "5173"]
+CMD ["serve", "dist", "-l", "5173"]

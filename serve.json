@@ -1,0 +1,10 @@
+{
+  "public": "dist",
+  "rewrites": [
+    {
+      "source": "/controller",
+      "destination": "/controller.html"
+    }
+  ]
+}
+
