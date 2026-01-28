@@ -723,9 +723,11 @@
     function changeLetter(index, direction) {
       let charCode = currentInitials[index].charCodeAt(0);
       if (direction === 'up') {
-        charCode = charCode >= 90 ? 65 : charCode + 1; // Z -> A, else next
-      } else {
+        // Up arrow should go to the previous letter (toward A)
         charCode = charCode <= 65 ? 90 : charCode - 1; // A -> Z, else prev
+      } else {
+        // Down arrow should go to the next letter (toward Z)
+        charCode = charCode >= 90 ? 65 : charCode + 1; // Z -> A, else next
       }
       currentInitials[index] = String.fromCharCode(charCode);
       updateInitialsDisplay();
