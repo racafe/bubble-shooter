@@ -668,9 +668,56 @@ class GameScene extends Phaser.Scene {
   init(data) {
     // Receive WebSocket connection from WaitingScene
     this.ws = data.ws;
+    
+    // Reset game state for scene restart (Phaser reuses scene instances)
+    this.isGameOver = false;
+    this.isPaused = false;
+    this.score = 0;
+    this.availableColorCount = 4;
+    this.descentInterval = INITIAL_DESCENT_INTERVAL;
+    this.isHighScore = false;
+    this.leaderboardRank = -1;
+    this.playerInitials = '';
+    this.selectedLetterIndex = 0;
+    this.initialsLetters = ['A', 'A', 'A'];
+    
+    // Clear timers if they exist
+    if (this.descentTimer) {
+      this.descentTimer.remove();
+      this.descentTimer = null;
+    }
+    if (this.warningTimer) {
+      this.warningTimer.remove();
+      this.warningTimer = null;
+    }
+    if (this.newColorTimeout) {
+      this.newColorTimeout.remove();
+      this.newColorTimeout = null;
+    }
   }
 
   create() {
+    
+    // Clean up any existing sprites from previous game (scene restart)
+    for (const bubble of this.gridBubbles) {
+      if (bubble.sprite) bubble.sprite.destroy();
+    }
+    this.gridBubbles = [];
+    
+    for (const bubble of this.fallingBubbles) {
+      if (bubble.sprite) bubble.sprite.destroy();
+    }
+    this.fallingBubbles = [];
+    
+    if (this.shootingBubble) {
+      this.shootingBubble.destroy();
+      this.shootingBubble = null;
+    }
+    
+    if (this.trajectoryGraphics) {
+      this.trajectoryGraphics.clear();
+    }
+    
     const { width, height } = this.cameras.main;
 
     // Create cartoon-style gradient background
@@ -728,8 +775,17 @@ class GameScene extends Phaser.Scene {
     const btnY = 30;
 
     // Button background
-    this.muteButton = this.add.rectangle(btnX, btnY, 60, 35, 0x000000, 0.4)
-      .setStrokeStyle(2, 0xffffff, 0.3)
+    const buttonShadow = this.add.graphics();
+    buttonShadow.fillStyle(0x000000, 0.25);
+    buttonShadow.fillRoundedRect(btnX - 28, btnY - 16, 60, 34, 10);
+
+    const buttonBg = this.add.graphics();
+    buttonBg.fillStyle(0xffffff, 0.18);
+    buttonBg.fillRoundedRect(btnX - 30, btnY - 18, 60, 34, 10);
+    buttonBg.lineStyle(2, 0xffffff, 0.5);
+    buttonBg.strokeRoundedRect(btnX - 30, btnY - 18, 60, 34, 10);
+
+    this.muteButton = this.add.rectangle(btnX, btnY, 60, 34, 0xffffff, 0.001)
       .setInteractive({ useHandCursor: true });
 
     // Music icon and state text
@@ -740,11 +796,19 @@ class GameScene extends Phaser.Scene {
 
     // Hover effects
     this.muteButton.on('pointerover', () => {
-      this.muteButton.setFillStyle(0x333333, 0.6);
+      buttonBg.clear();
+      buttonBg.fillStyle(0xffffff, 0.28);
+      buttonBg.fillRoundedRect(btnX - 30, btnY - 18, 60, 34, 10);
+      buttonBg.lineStyle(2, 0xffffff, 0.65);
+      buttonBg.strokeRoundedRect(btnX - 30, btnY - 18, 60, 34, 10);
     });
 
     this.muteButton.on('pointerout', () => {
-      this.muteButton.setFillStyle(0x000000, 0.4);
+      buttonBg.clear();
+      buttonBg.fillStyle(0xffffff, 0.18);
+      buttonBg.fillRoundedRect(btnX - 30, btnY - 18, 60, 34, 10);
+      buttonBg.lineStyle(2, 0xffffff, 0.5);
+      buttonBg.strokeRoundedRect(btnX - 30, btnY - 18, 60, 34, 10);
     });
 
     // Click to toggle mute
@@ -1179,23 +1243,36 @@ class GameScene extends Phaser.Scene {
   }
 
   createGradientBackground(width, height) {
-    // Create a gradient texture programmatically
-    const gradientTexture = this.textures.createCanvas('gradient-bg', width, height);
-    const ctx = gradientTexture.getContext();
+    // Add the same illustrated background as the QR screen
+    const bgImage = this.add.image(width / 2, height / 2, 'bubbleShooterBg');
 
-    // Cartoon-style gradient from sky blue to soft purple
-    const gradient = ctx.createLinearGradient(0, 0, 0, height);
-    gradient.addColorStop(0, '#667eea');    // Purple-blue at top
-    gradient.addColorStop(0.5, '#764ba2');  // Purple in middle
-    gradient.addColorStop(1, '#f093fb');    // Pink-purple at bottom
+    // Cover scale (CSS background-size: cover)
+    const imageWidth = bgImage.width;
+    const imageHeight = bgImage.height;
+    const scaleX = width / imageWidth;
+    const scaleY = height / imageHeight;
+    const scale = Math.max(scaleX, scaleY);
 
-    ctx.fillStyle = gradient;
+    bgImage.setScale(scale);
+    bgImage.setDepth(-3);
+
+    // Soft color wash for readability + depth
+    // Remove existing texture if present (for game restarts)
+    if (this.textures.exists('game-vibe-overlay')) {
+      this.textures.remove('game-vibe-overlay');
+    }
+    const overlayTexture = this.textures.createCanvas('game-vibe-overlay', width, height);
+    const ctx = overlayTexture.getContext();
+    const overlay = ctx.createLinearGradient(0, 0, 0, height);
+    overlay.addColorStop(0, 'rgba(255, 255, 255, 0.08)');
+    overlay.addColorStop(0.55, 'rgba(120, 98, 180, 0.18)');
+    overlay.addColorStop(1, 'rgba(173, 110, 208, 0.35)');
+    ctx.fillStyle = overlay;
     ctx.fillRect(0, 0, width, height);
+    overlayTexture.refresh();
 
-    gradientTexture.refresh();
-
-    // Add the background image
-    this.add.image(width / 2, height / 2, 'gradient-bg');
+    this.add.image(width / 2, height / 2, 'game-vibe-overlay')
+      .setDepth(-2);
 
     // Add animated background elements (floating bubbles, sparkles)
     this.createAnimatedBackgroundElements(width, height);
@@ -1204,7 +1281,7 @@ class GameScene extends Phaser.Scene {
   createAnimatedBackgroundElements(width, height) {
     // Create floating decorative bubbles in the background
     const numBubbles = 12;
-    const colors = [0xffffff, 0xe0e7ff, 0xfce7f3, 0xddd6fe];
+    const colors = [0xffffff, 0xfce7f3, 0xe9d5ff, 0xc7d2fe];
 
     for (let i = 0; i < numBubbles; i++) {
       const x = Math.random() * width;
@@ -1214,7 +1291,7 @@ class GameScene extends Phaser.Scene {
       const color = Phaser.Utils.Array.GetRandom(colors);
 
       const bubble = this.add.circle(x, y, radius, color, alpha);
-      bubble.setDepth(-1); // Behind game elements
+      bubble.setDepth(-2); // Behind game elements
 
       // Store for cleanup
       this.bgElements.push(bubble);
@@ -1253,7 +1330,7 @@ class GameScene extends Phaser.Scene {
       const y = 80 + Math.random() * (height - 200);
 
       const sparkle = this.add.star(x, y, 4, 2, 5, 0xffffff, 0.3);
-      sparkle.setDepth(-1);
+      sparkle.setDepth(-2);
       this.bgElements.push(sparkle);
 
       // Twinkling animation
@@ -1281,14 +1358,49 @@ class GameScene extends Phaser.Scene {
 
   createWalls(width, height) {
     const wallThickness = 10;
-    const wallColor = 0x2d3436;
-    const wallAlpha = 0.8;
+    const wallColor = 0xb9b1f5;
+    const wallAlpha = 0.75;
 
     // Game area dimensions (leave space for UI)
     const gameTop = 60;  // Space for score
     const gameBottom = height - 100;  // Space for shooter
     const gameLeft = 20;
     const gameRight = width - 20;
+
+    // Soft playfield panel for depth
+    const panelWidth = gameRight - gameLeft + 20;
+    const panelHeight = gameBottom - gameTop + 20;
+    const panelX = (gameLeft + gameRight) / 2;
+    const panelY = (gameTop + gameBottom) / 2;
+    const panelShadow = this.add.graphics();
+    panelShadow.fillStyle(0x000000, 0.2);
+    panelShadow.fillRoundedRect(
+      panelX - panelWidth / 2 + 4,
+      panelY - panelHeight / 2 + 6,
+      panelWidth,
+      panelHeight,
+      22
+    );
+    panelShadow.setDepth(-1);
+
+    const panel = this.add.graphics();
+    panel.fillStyle(0xffffff, 0.12);
+    panel.fillRoundedRect(
+      panelX - panelWidth / 2,
+      panelY - panelHeight / 2,
+      panelWidth,
+      panelHeight,
+      22
+    );
+    panel.lineStyle(2, 0xffffff, 0.25);
+    panel.strokeRoundedRect(
+      panelX - panelWidth / 2,
+      panelY - panelHeight / 2,
+      panelWidth,
+      panelHeight,
+      22
+    );
+    panel.setDepth(-1);
 
     // Left wall
     this.add.rectangle(
@@ -1348,14 +1460,21 @@ class GameScene extends Phaser.Scene {
 
   createScoreDisplay() {
     // Score background panel with rounded look
-    const panel = this.add.rectangle(80, 30, 140, 45, 0x000000, 0.5);
-    panel.setStrokeStyle(3, 0xffffff, 0.4);
+    const panelShadow = this.add.graphics();
+    panelShadow.fillStyle(0x000000, 0.25);
+    panelShadow.fillRoundedRect(12, 10, 160, 48, 16);
+
+    const panel = this.add.graphics();
+    panel.fillStyle(0xffffff, 0.18);
+    panel.fillRoundedRect(10, 8, 160, 48, 16);
+    panel.lineStyle(2, 0xffffff, 0.5);
+    panel.strokeRoundedRect(10, 8, 160, 48, 16);
 
     // Score label with playful font
     this.add.text(20, 18, 'SCORE', {
       fontSize: '14px',
       fontFamily: '"Comic Sans MS", "Chalkboard", cursive, sans-serif',
-      color: '#ffffff',
+      color: '#fff6ff',
       fontStyle: 'bold'
     });
 
@@ -1363,10 +1482,10 @@ class GameScene extends Phaser.Scene {
     this.scoreText = this.add.text(20, 35, '0', {
       fontSize: '22px',
       fontFamily: '"Comic Sans MS", "Chalkboard", cursive, sans-serif',
-      color: '#ffe66d',
+      color: '#ffe8ff',
       fontStyle: 'bold',
-      stroke: '#000000',
-      strokeThickness: 2
+      stroke: '#a855f7',
+      strokeThickness: 3
     });
   }
 
@@ -1375,12 +1494,12 @@ class GameScene extends Phaser.Scene {
     const shooterX = width / 2;
 
     // Shooter base (semi-circle platform) with gradient-like effect
-    const base = this.add.arc(shooterX, shooterY + 20, 50, 180, 0, false, 0x2d3436, 0.9);
-    base.setStrokeStyle(3, 0xffffff, 0.4);
+    const base = this.add.arc(shooterX, shooterY + 20, 52, 180, 0, false, 0x362a62, 0.75);
+    base.setStrokeStyle(3, 0xffffff, 0.5);
 
     // Decorative rings on base
-    this.add.arc(shooterX, shooterY + 20, 40, 180, 0, false, 0x3d4446, 0.5);
-    this.add.arc(shooterX, shooterY + 20, 30, 180, 0, false, 0x4d5456, 0.3);
+    this.add.arc(shooterX, shooterY + 20, 42, 180, 0, false, 0x6b5fc1, 0.4);
+    this.add.arc(shooterX, shooterY + 20, 32, 180, 0, false, 0xc4b5fd, 0.3);
 
     // Shooter cannon/tube with metallic look
     this.shooterCannon = this.add.rectangle(
@@ -1388,9 +1507,9 @@ class GameScene extends Phaser.Scene {
       shooterY - 10,
       18,
       42,
-      0x636e72,
-      1
-    ).setStrokeStyle(2, 0xffffff, 0.5);
+      0x7864c8,
+      0.9
+    ).setStrokeStyle(2, 0xffffff, 0.6);
 
     // Cannon highlight
     this.add.rectangle(shooterX - 4, shooterY - 10, 3, 38, 0xffffff, 0.2);
@@ -1415,13 +1534,13 @@ class GameScene extends Phaser.Scene {
     this.add.text(previewX - 25, previewY - 38, 'NEXT', {
       fontSize: '12px',
       fontFamily: '"Comic Sans MS", "Chalkboard", cursive, sans-serif',
-      color: '#ffffff',
+      color: '#fff6ff',
       fontStyle: 'bold'
     });
 
     // Preview bubble background
-    this.add.circle(previewX, previewY, 20, 0x000000, 0.4)
-      .setStrokeStyle(2, 0xffffff, 0.3);
+    this.add.circle(previewX, previewY, 22, 0xffffff, 0.18)
+      .setStrokeStyle(2, 0xffffff, 0.5);
 
     // Next bubble preview (glossy mini version)
     this.nextBubbleContainer = this.createGlossyBubble(
@@ -3054,15 +3173,38 @@ class WaitingScene extends Phaser.Scene {
     this.ws = null;
     this.roomCode = null;
     this.qrImage = null;
+    this.qrBackground = null;
     this.waitingText = null;
     this.connectedText = null;
   }
 
-  create() {
-    this.cameras.main.setBackgroundColor('#1a1a2e');
+  preload() {
+    // Load background image
+    this.load.image('bubbleShooterBg', '/assets/bg.png');
+  }
 
-    const centerX = this.cameras.main.width / 2;
-    const centerY = this.cameras.main.height / 2;
+  create() {
+    const { width, height } = this.cameras.main;
+
+    // Add background image with cover sizing (maintains aspect ratio, covers entire screen)
+    this.bgImage = this.add.image(width / 2, height / 2, 'bubbleShooterBg');
+    
+    // Get image dimensions and calculate scale to cover screen (like CSS background-size: cover)
+    const imageWidth = this.bgImage.width;
+    const imageHeight = this.bgImage.height;
+    const scaleX = width / imageWidth;
+    const scaleY = height / imageHeight;
+    const scale = Math.max(scaleX, scaleY); // Use larger scale to ensure coverage
+    
+    this.bgImage.setScale(scale);
+    this.bgImage.setDepth(-1); // Behind all other elements
+
+    // Add semi-transparent overlay to ensure text is readable
+    this.add.rectangle(width / 2, height / 2, width, height, 0x000000, 0.3)
+      .setDepth(0);
+
+    const centerX = width / 2;
+    const centerY = height / 2;
 
     // Title with playful font
     const title = this.add.text(centerX, 50, 'Bubble Shooter', {
@@ -3091,14 +3233,20 @@ class WaitingScene extends Phaser.Scene {
     this.waitingText = this.add.text(centerX, centerY + 150, 'Connecting to server...', {
       fontSize: '24px',
       fontFamily: '"Comic Sans MS", "Chalkboard", cursive, sans-serif',
-      color: '#888888',
+      color: '#ffffff',
+      fontStyle: 'bold',
+      stroke: '#000000',
+      strokeThickness: 4
     }).setOrigin(0.5);
 
     // Room code display (initially hidden)
     this.roomCodeText = this.add.text(centerX, centerY + 190, '', {
       fontSize: '18px',
       fontFamily: '"Comic Sans MS", "Chalkboard", cursive, sans-serif',
-      color: '#666666',
+      color: '#ffffff',
+      fontStyle: 'bold',
+      stroke: '#000000',
+      strokeThickness: 4
     }).setOrigin(0.5);
 
     // Connected confirmation text (initially hidden)
@@ -3192,21 +3340,75 @@ class WaitingScene extends Phaser.Scene {
     const centerX = this.cameras.main.width / 2;
     const centerY = this.cameras.main.height / 2;
 
-    // Add QR code image
+    // QR code dimensions
+    const qrSize = 220; // QR code size
+    const padding = 15; // White padding around QR code
+    const totalSize = qrSize + (padding * 2); // Total size with padding
+    const cornerRadius = 20; // Rounded corner radius
+    
+    // Create white rounded rectangle background with padding
+    this.qrBackground = this.add.graphics();
+    const bgX = centerX - totalSize / 2;
+    const bgY = centerY - 30 - totalSize / 2;
+    
+    this.qrBackground.fillStyle(0xffffff);
+    this.qrBackground.beginPath();
+    this.qrBackground.moveTo(bgX + cornerRadius, bgY);
+    this.qrBackground.lineTo(bgX + totalSize - cornerRadius, bgY);
+    this.qrBackground.arc(bgX + totalSize - cornerRadius, bgY + cornerRadius, cornerRadius, -Math.PI / 2, 0);
+    this.qrBackground.lineTo(bgX + totalSize, bgY + totalSize - cornerRadius);
+    this.qrBackground.arc(bgX + totalSize - cornerRadius, bgY + totalSize - cornerRadius, cornerRadius, 0, Math.PI / 2);
+    this.qrBackground.lineTo(bgX + cornerRadius, bgY + totalSize);
+    this.qrBackground.arc(bgX + cornerRadius, bgY + totalSize - cornerRadius, cornerRadius, Math.PI / 2, Math.PI);
+    this.qrBackground.lineTo(bgX, bgY + cornerRadius);
+    this.qrBackground.arc(bgX + cornerRadius, bgY + cornerRadius, cornerRadius, Math.PI, -Math.PI / 2);
+    this.qrBackground.closePath();
+    this.qrBackground.fillPath();
+    this.qrBackground.setDepth(1);
+    
+    // Add QR code image (centered on the white background)
     this.qrImage = this.add.image(centerX, centerY - 30, 'qrcode');
+    this.qrImage.setDepth(2);
+    
+    // Create rounded rectangle mask for QR code
+    const maskGraphics = this.make.graphics();
+    const x = centerX - qrSize / 2;
+    const y = centerY - 30 - qrSize / 2;
+    maskGraphics.fillStyle(0xffffff);
+    maskGraphics.beginPath();
+    maskGraphics.moveTo(x + cornerRadius, y);
+    maskGraphics.lineTo(x + qrSize - cornerRadius, y);
+    maskGraphics.arc(x + qrSize - cornerRadius, y + cornerRadius, cornerRadius, -Math.PI / 2, 0);
+    maskGraphics.lineTo(x + qrSize, y + qrSize - cornerRadius);
+    maskGraphics.arc(x + qrSize - cornerRadius, y + qrSize - cornerRadius, cornerRadius, 0, Math.PI / 2);
+    maskGraphics.lineTo(x + cornerRadius, y + qrSize);
+    maskGraphics.arc(x + cornerRadius, y + qrSize - cornerRadius, cornerRadius, Math.PI / 2, Math.PI);
+    maskGraphics.lineTo(x, y + cornerRadius);
+    maskGraphics.arc(x + cornerRadius, y + cornerRadius, cornerRadius, Math.PI, -Math.PI / 2);
+    maskGraphics.closePath();
+    maskGraphics.fillPath();
+    
+    const mask = maskGraphics.createGeometryMask();
+    this.qrImage.setMask(mask);
 
     // Update waiting text
     this.waitingText.setText('Waiting for controller...');
-    this.waitingText.setColor('#888888');
+    this.waitingText.setColor('#ffffff');
+    this.waitingText.setStroke('#000000', 4);
 
     // Show room code
     this.roomCodeText.setText(`Room: ${this.roomCode}`);
+    this.roomCodeText.setColor('#ffffff');
+    this.roomCodeText.setStroke('#000000', 4);
   }
 
   onControllerConnected() {
     // Hide QR code and waiting elements
     if (this.qrImage) {
       this.qrImage.setVisible(false);
+    }
+    if (this.qrBackground) {
+      this.qrBackground.setVisible(false);
     }
     this.waitingText.setVisible(false);
     this.roomCodeText.setVisible(false);
@@ -3225,8 +3427,12 @@ class WaitingScene extends Phaser.Scene {
     if (this.qrImage) {
       this.qrImage.setVisible(true);
     }
+    if (this.qrBackground) {
+      this.qrBackground.setVisible(true);
+    }
     this.waitingText.setText('Controller disconnected. Scan to reconnect...');
     this.waitingText.setColor('#f59e0b');
+    this.waitingText.setStroke('#000000', 4);
     this.waitingText.setVisible(true);
     this.roomCodeText.setVisible(true);
     this.connectedText.setVisible(false);

@@ -380,7 +380,7 @@
     <div class="angle-display" id="angleDisplay">90°</div>
     <div class="aim-line" id="aimLine"></div>
 
-    <p class="instructions">Drag to aim, release to shoot</p>
+    <p class="instructions">Pull back to aim, release to shoot</p>
 
     <div class="joystick-container" id="joystickContainer">
       <div class="joystick-base">
@@ -799,10 +799,11 @@
       }
     }
 
-    // Calculate angle from joystick position
+    // Calculate angle from joystick position (inverted controls)
     function calculateAngle(dx, dy) {
-      // Convert to angle (0 = right, 90 = up, 180 = left)
-      let angle = Math.atan2(-dy, dx) * (180 / Math.PI);
+      // Inverted: pull back to aim forward (like Angry Birds)
+      // Negate dx and dy so pulling down-left shoots up-right
+      let angle = Math.atan2(dy, -dx) * (180 / Math.PI);
       // Normalize to 0-180 range (we only shoot upward)
       if (angle < 0) angle += 360;
       // Clamp to valid shooting angles (10-170 degrees)
@@ -859,7 +860,8 @@
       const lineLength = Math.min(200, distance * 3);
 
       // Calculate rotation angle (CSS rotation is clockwise from top)
-      const rotation = Math.atan2(dx, -dy) * (180 / Math.PI);
+      // Inverted: aim line points opposite to drag direction
+      const rotation = Math.atan2(-dx, dy) * (180 / Math.PI);
 
       aimLine.style.display = 'block';
       aimLine.style.left = `${startX - 2}px`;
