@@ -391,9 +391,15 @@
 
   <script type="module">
     // Configuration
-    const HOSTNAME = window.location.hostname === 'localhost' ? 'localhost' : 'ws.'+window.location.hostname;
-    const PORT = window.location.hostname === 'localhost' ? 3000 : 80;
-    const WS_URL = `ws://${HOSTNAME}:${WS_PORT}`;
+    const IS_SSL = window.location.protocol === 'https:';
+    const HOSTNAME = window.location.hostname === 'localhost'
+      ? 'localhost'
+      : `ws.${window.location.hostname}`;
+
+    // In dev we talk to ws://localhost:3000, in production to wss://ws.<domain> (default 443)
+    const WS_URL = IS_SSL
+      ? `wss://${HOSTNAME}`
+      : `ws://${HOSTNAME}:3000`;
 
     // Get room code from URL
     const urlParams = new URLSearchParams(window.location.search);

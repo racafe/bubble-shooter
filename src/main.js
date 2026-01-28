@@ -2,13 +2,22 @@ import Phaser from 'phaser';
 import QRCode from 'qrcode';
 
 // Configuration
-const HOSTNAME = window.location.hostname === 'localhost' ? 'localhost' : 'ws.'+window.location.hostname;
-const WS_PORT = window.location.hostname === 'localhost' ? 3000 : 80;
-const WS_URL = `ws://${HOSTNAME}:${WS_PORT}`;
+const GAME_HOSTNAME = window.location.hostname;
+const IS_SSL = window.location.protocol === 'https:';
 
-const CONTROLLER_PORT = window.location.hostname === 'localhost' ? 5173 : 80;
-const IS_SSL = window.location.hostname !== 'localhost';
-const CONTROLLER_BASE_URL = `${IS_SSL ? 'https' : 'http'}://${HOSTNAME}:${CONTROLLER_PORT}/controller.html`;
+// WebSocket hostname: localhost in dev, ws.<domain> in production
+const WS_HOSTNAME = GAME_HOSTNAME === 'localhost' ? 'localhost' : `ws.${GAME_HOSTNAME}`;
+
+// In dev we talk to ws://localhost:3000, in production to wss://ws.<domain> (default 443)
+const WS_URL = IS_SSL
+  ? `wss://${WS_HOSTNAME}`
+  : `ws://${WS_HOSTNAME}:3000`;
+
+// Controller is served from the main site (same origin) in production,
+// and from Vite dev server in development.
+const CONTROLLER_BASE_URL = GAME_HOSTNAME === 'localhost'
+  ? `http://${GAME_HOSTNAME}:5173/controller.html`
+  : `https://${GAME_HOSTNAME}/controller.html`;
 
 // Sound Manager using Web Audio API for procedural sound generation
 class SoundManager {
