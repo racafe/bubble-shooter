@@ -391,7 +391,9 @@
 
   <script type="module">
     // Configuration
-    const WS_URL = `ws://${window.location.hostname}:3000`;
+    const HOSTNAME = window.location.hostname === 'localhost' ? 'localhost' : 'ws.'+window.location.hostname;
+    const PORT = window.location.hostname === 'localhost' ? 3000 : 80;
+    const WS_URL = `ws://${HOSTNAME}:3000`;
 
     // Get room code from URL
     const urlParams = new URLSearchParams(window.location.search);
