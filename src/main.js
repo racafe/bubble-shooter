@@ -2,8 +2,13 @@ import Phaser from 'phaser';
 import QRCode from 'qrcode';
 
 // Configuration
-const WS_URL = `ws://${window.location.hostname}:3000`;
-const CONTROLLER_BASE_URL = `http://${window.location.hostname}:5173/controller.html`;
+const HOSTNAME = window.location.hostname === 'localhost' ? 'localhost' : 'ws.'+window.location.hostname;
+const WS_PORT = window.location.hostname === 'localhost' ? 3000 : 80;
+const WS_URL = `ws://${HOSTNAME}:${WS_PORT}`;
+
+const CONTROLLER_PORT = window.location.hostname === 'localhost' ? 5173 : 80;
+const IS_SSL = window.location.hostname !== 'localhost';
+const CONTROLLER_BASE_URL = `${IS_SSL ? 'https' : 'http'}://${HOSTNAME}:${CONTROLLER_PORT}/controller.html`;
 
 // Sound Manager using Web Audio API for procedural sound generation
 class SoundManager {
