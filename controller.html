@@ -331,10 +331,144 @@
       text-align: center;
       margin-top: 20px;
     }
+
+    /* Room code input overlay */
+    .room-input-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.95);
+      display: none;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      z-index: 300;
+      padding: 20px;
+    }
+    .room-input-overlay.visible {
+      display: flex;
+    }
+    .room-input-title {
+      color: #4ade80;
+      font-size: 32px;
+      font-weight: bold;
+      margin-bottom: 10px;
+      text-align: center;
+    }
+    .room-input-subtitle {
+      color: #888;
+      font-size: 16px;
+      margin-bottom: 40px;
+      text-align: center;
+    }
+    .room-input-container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 20px;
+      width: 100%;
+      max-width: 300px;
+    }
+    .room-input-wrapper {
+      display: flex;
+      gap: 10px;
+      justify-content: center;
+    }
+    .room-input-box {
+      width: 50px;
+      height: 60px;
+      background: rgba(255, 255, 255, 0.1);
+      border: 3px solid rgba(255, 255, 255, 0.3);
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #fff;
+      font-size: 28px;
+      font-weight: bold;
+      text-transform: uppercase;
+      text-align: center;
+    }
+    .room-input-box.filled {
+      border-color: #4ade80;
+      background: rgba(74, 222, 128, 0.1);
+    }
+    .room-input-text {
+      width: 100%;
+      max-width: 300px;
+      height: 60px;
+      background: rgba(255, 255, 255, 0.1);
+      border: 3px solid rgba(255, 255, 255, 0.3);
+      border-radius: 10px;
+      color: #fff;
+      font-size: 24px;
+      font-weight: bold;
+      text-transform: uppercase;
+      text-align: center;
+      padding: 0 20px;
+      letter-spacing: 8px;
+    }
+    .room-input-text:focus {
+      outline: none;
+      border-color: #4ade80;
+      background: rgba(74, 222, 128, 0.1);
+    }
+    .room-input-text::placeholder {
+      color: rgba(255, 255, 255, 0.3);
+      letter-spacing: 0;
+    }
+    .room-connect-button {
+      background: linear-gradient(145deg, #4ade80, #22c55e);
+      color: #000;
+      border: none;
+      padding: 16px 50px;
+      font-size: 18px;
+      font-weight: bold;
+      border-radius: 30px;
+      cursor: pointer;
+      transition: transform 0.1s;
+      margin-top: 10px;
+    }
+    .room-connect-button:active {
+      transform: scale(0.95);
+    }
+    .room-connect-button:disabled {
+      background: #666;
+      color: #999;
+      cursor: not-allowed;
+    }
+    .room-input-error {
+      color: #ef4444;
+      font-size: 14px;
+      margin-top: -10px;
+      min-height: 20px;
+      text-align: center;
+    }
   </style>
 </head>
 <body>
   <div class="status-bar connecting" id="statusBar">Connecting...</div>
+
+  <!-- Room code input overlay -->
+  <div class="room-input-overlay" id="roomInputOverlay">
+    <div class="room-input-title">Enter Room Code</div>
+    <div class="room-input-subtitle" id="roomInputSubtitle">Enter the 6-character room code</div>
+    <div class="room-input-container">
+      <input 
+        type="text" 
+        class="room-input-text" 
+        id="roomInputText" 
+        placeholder="ABCDEF" 
+        maxlength="6"
+        autocomplete="off"
+        autocapitalize="characters"
+      />
+      <div class="room-input-error" id="roomInputError"></div>
+      <button class="room-connect-button" id="roomConnectButton">CONNECT</button>
+    </div>
+  </div>
 
   <!-- Reconnect overlay -->
   <div class="reconnect-overlay" id="reconnectOverlay">
@@ -408,10 +542,15 @@
 
     // Get room code from URL
     const urlParams = new URLSearchParams(window.location.search);
-    const roomCode = urlParams.get('room');
+    let roomCode = urlParams.get('room');
 
     // DOM elements
     const statusBar = document.getElementById('statusBar');
+    const roomInputOverlay = document.getElementById('roomInputOverlay');
+    const roomInputText = document.getElementById('roomInputText');
+    const roomConnectButton = document.getElementById('roomConnectButton');
+    const roomInputError = document.getElementById('roomInputError');
+    const roomInputSubtitle = document.getElementById('roomInputSubtitle');
     const controllerArea = document.getElementById('controllerArea');
     const joystickContainer = document.getElementById('joystickContainer');
     const joystickKnob = document.getElementById('joystickKnob');
@@ -502,10 +641,53 @@
       }
     }
 
+    // Show room input overlay
+    function showRoomInput(subtitle = 'Enter the 6-character room code') {
+      roomInputSubtitle.textContent = subtitle;
+      roomInputText.value = '';
+      roomInputError.textContent = '';
+      roomInputOverlay.classList.add('visible');
+      controllerArea.style.display = 'none';
+      setStatus('disconnected', 'Enter room code');
+      // Focus input after a short delay to ensure overlay is visible
+      setTimeout(() => {
+        roomInputText.focus();
+      }, 100);
+    }
+
+    // Hide room input overlay
+    function hideRoomInput() {
+      roomInputOverlay.classList.remove('visible');
+      controllerArea.style.display = 'flex';
+    }
+
+    // Handle room code input and connection
+    function handleRoomCodeSubmit() {
+      const inputValue = roomInputText.value.trim().toUpperCase();
+      
+      // Validate room code
+      if (!inputValue || inputValue.length !== 6) {
+        roomInputError.textContent = 'Please enter a 6-character room code';
+        return;
+      }
+
+      // Check if it's alphanumeric
+      if (!/^[A-Z0-9]{6}$/.test(inputValue)) {
+        roomInputError.textContent = 'Room code must be letters and numbers only';
+        return;
+      }
+
+      // Set room code and connect
+      roomCode = inputValue;
+      roomInputError.textContent = '';
+      hideRoomInput();
+      connect();
+    }
+
     // Connect to WebSocket server
     function connect(isReconnect = false) {
       if (!roomCode) {
-        setStatus('error', 'No room code provided');
+        showRoomInput();
         return;
       }
 
@@ -624,12 +806,7 @@
           setStatus('error', message.data?.message || 'Error');
           const errorMsg = message.data?.message || '';
           if (errorMsg.includes('Room') && (errorMsg.includes('not found') || errorMsg.includes('expired'))) {
-            // Room no longer exists, show error state
-            showReconnectOverlay(
-              'Room Expired',
-              'The game session has ended',
-              false
-            );
+            // Room no longer exists, show room input
             isReconnecting = false;
             // Close WebSocket
             if (ws) {
@@ -637,6 +814,9 @@
               ws = null;
             }
             isConnected = false;
+            roomCode = null;
+            hideReconnectOverlay();
+            showRoomInput('Room not found or expired. Enter a new room code');
           }
           break;
         case 'peer_disconnected':
@@ -753,7 +933,15 @@
 
       // Update UI
       initialsSection.style.display = 'none';
-      gameoverMessage.textContent = 'Score saved! Waiting for new game...';
+      gameoverMessage.textContent = 'Score saved!';
+
+      // After a short delay, show room input to allow joining a new game
+      setTimeout(() => {
+        if (isGameOver) {
+          gameoverOverlay.classList.remove('visible');
+          showRoomInput('Enter a new room code to play again');
+        }
+      }, 2000);
     }
 
     // Send initials to desktop
@@ -785,13 +973,10 @@
         ws = null;
       }
       isConnected = false;
+      roomCode = null; // Clear room code
 
-      // Show room expired overlay
-      showReconnectOverlay(
-        'Game Ended',
-        'Scan the QR code to play again',
-        false
-      );
+      // Show room input to allow entering a new room code
+      showRoomInput('Game ended. Enter a new room code to play again');
     }
 
     // Send shoot command to desktop
@@ -1013,9 +1198,31 @@
     // Submit initials button
     submitInitialsBtn.addEventListener('click', submitInitials);
 
+    // Room code input handlers
+    roomInputText.addEventListener('input', (e) => {
+      // Convert to uppercase and filter non-alphanumeric
+      const value = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '');
+      e.target.value = value;
+      roomInputError.textContent = '';
+    });
+
+    roomInputText.addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') {
+        handleRoomCodeSubmit();
+      }
+    });
+
+    roomConnectButton.addEventListener('click', handleRoomCodeSubmit);
+
     // Initialize
     updateJoystickCenter();
-    connect();
+    
+    // Show room input if no room code in URL, otherwise connect
+    if (!roomCode) {
+      showRoomInput();
+    } else {
+      connect();
+    }
   </script>
 </body>
 </html>
