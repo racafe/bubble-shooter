@@ -3180,6 +3180,11 @@ class GameScene extends Phaser.Scene {
 
   // Return to the waiting scene (QR code)
   returnToWaitingScene() {
+    // Send gameEnd message to parent window if in iframe
+    if (window.parent !== window) {
+      window.parent.postMessage({ type: 'gameEnd' }, '*');
+    }
+
     // Tell server to close the room (this notifies the controller)
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify({ type: 'close_room' }));
